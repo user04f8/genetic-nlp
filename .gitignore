@@ -1,1 +1,8 @@
-environment_specific_notes.md
+__pycache__/
+**/__pycache__/
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+dev/environment_specific_notes.md
+dev/host_notebook.sh
+data/
