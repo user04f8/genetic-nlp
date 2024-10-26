@@ -7,3 +7,6 @@ dev/environment_specific_notes.md
 dev/host_notebook.sh
 data/
 diagrams/
+logs/
+
+glove.840B.300d.word2vec.bin

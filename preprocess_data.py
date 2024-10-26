@@ -68,7 +68,7 @@ def preprocess():
 
     print("Data successfully compressed and saved as Parquet.")
 
-def load_preprocessed_data():
+def load_data():
     if os.path.exists(train_parquet_path) and os.path.exists(test_parquet_path):
         print('Loading preprocessed Parquet files...', end='')
         train_df = pd.read_parquet(train_parquet_path)
