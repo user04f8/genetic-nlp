@@ -6,3 +6,4 @@ __pycache__/
 dev/environment_specific_notes.md
 dev/host_notebook.sh
 data/
+diagrams/
