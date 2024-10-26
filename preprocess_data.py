@@ -70,9 +70,11 @@ def preprocess():
 
 def load_preprocessed_data():
     if os.path.exists(train_parquet_path) and os.path.exists(test_parquet_path):
-        print('Loading preprocessed Parquet files...')
+        print('Loading preprocessed Parquet files...', end='')
         train_df = pd.read_parquet(train_parquet_path)
+        print('...', end='')
         test_df = pd.read_parquet(test_parquet_path)
+        print(' Done!')
         return train_df, test_df
     else:
         raise FileNotFoundError("Preprocessed Parquet files not found. Run the preprocess() function first.")
