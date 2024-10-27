@@ -88,8 +88,8 @@ def compute_als(reviews_df, n_factors):
     # Initialize the ALS model
     als_model = implicit.als.AlternatingLeastSquares(
         factors=n_factors,
-        regularization=0.1,
-        iterations=500,
+        regularization=0.5,
+        iterations=5,
         use_gpu=False  # Disable GPU to avoid CuPy
     )
 

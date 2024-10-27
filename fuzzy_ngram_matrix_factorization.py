@@ -110,13 +110,14 @@ def collate_fn(batch):
         'user': users,
         'product': products,
         'label': labels,
-        'helpfulness_ratios': helpfulness_ratios,
-        'log_helpfulness_denominators': log_helpfulness_denominators
+        'helpfulness_ratio': helpfulness_ratios,
+        'log_helpfulness_denominator': log_helpfulness_denominators
     }
 
 class SentimentModel(pl.LightningModule):
     def __init__(self, num_users, num_products, embedding_dim=300, n_filters=100, filter_sizes=[3,4,5], 
-                 user_emb_dim=50, product_emb_dim=50, output_dim=5, dropout=0.5, learning_rate=1e-3, user_embedding_weights=None, product_embedding_weights=None, als_freeze=True, latent_user_product_dim=10):
+                 user_emb_dim=50, product_emb_dim=50, output_dim=5, dropout=0.5, learning_rate=1e-3, user_embedding_weights=None, product_embedding_weights=None, als_freeze=False, latent_user_product_dim=25,
+                 enable_user_product_dim_reduce=False):
         super(SentimentModel, self).__init__()
 
         self.save_hyperparameters()
@@ -142,7 +143,14 @@ class SentimentModel(pl.LightningModule):
             self.user_embedding = nn.Embedding(num_users, user_emb_dim)
             self.product_embedding = nn.Embedding(num_products, product_emb_dim)
         
-        self.user_product_dim_reduction = nn.Linear(user_emb_dim + product_emb_dim, latent_user_product_dim)
+        self.enable_user_product_dim_reduce = enable_user_product_dim_reduce
+        if self.enable_user_product_dim_reduce:
+            self.user_product_dim_reduction = nn.Linear(user_emb_dim + product_emb_dim, latent_user_product_dim)
+            self.user_product_pool = F.relu
+        else:
+            self.user_product_dim_reduction = nn.Identity()
+            self.user_product_pool = nn.Identity()
+            latent_user_product_dim = user_emb_dim + product_emb_dim
 
         # Feature weighting
         self.feature_weights = nn.Linear(len(filter_sizes)*n_filters*2 + latent_user_product_dim + 2, output_dim)
@@ -177,16 +185,20 @@ class SentimentModel(pl.LightningModule):
         # User and Product Embeddings
         user_embedded = self.user_embedding(user_idx)  # [batch_size, user_emb_dim]
         product_embedded = self.product_embedding(product_idx)  # [batch_size, product_emb_dim]
+
+        # Ensure helpfulness_ratio and log_helpfulness_denominator are 2D tensors
+        helpfulness_ratio = helpfulness_ratio.unsqueeze(1)                      # [batch_size, 1]
+        log_helpfulness_denominator = log_helpfulness_denominator.unsqueeze(1)  # [batch_size, 1]
         
         # Concatenate all features
-        combined = torch.cat([text_cat, F.relu(self.user_product_dim_reduction(torch.cat([user_embedded, product_embedded], dim=1))), helpfulness_ratio, log_helpfulness_denominator], dim=1)
+        combined = torch.cat([text_cat, self.user_product_pool(self.user_product_dim_reduction(torch.cat([user_embedded, product_embedded], dim=1))), helpfulness_ratio, log_helpfulness_denominator], dim=1)
 
         combined = self.dropout(combined)
 
         return self.feature_weights(combined)
 
     def training_step(self, batch, batch_idx):
-        outputs = self.forward(batch['text'], batch['summary'], batch['user'], batch['product'])
+        outputs = self.forward(batch['text'], batch['summary'], batch['user'], batch['product'], batch['helpfulness_ratio'], batch['log_helpfulness_denominator'])
         loss = F.cross_entropy(outputs, batch['label'])
         acc = (outputs.argmax(1) == batch['label']).float().mean()
         self.log('train_loss', loss, prog_bar=True)
@@ -194,7 +206,7 @@ class SentimentModel(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        outputs = self.forward(batch['text'], batch['summary'], batch['user'], batch['product'])
+        outputs = self.forward(batch['text'], batch['summary'], batch['user'], batch['product'], batch['helpfulness_ratio'], batch['log_helpfulness_denominator'])
         loss = F.cross_entropy(outputs, batch['label'])
         acc = (outputs.argmax(1) == batch['label']).float().mean()
         self.log('val_loss', loss, prog_bar=True, sync_dist=True)
@@ -240,7 +252,7 @@ if __name__ == '__main__':
     # Load the data
     reviews_df, test_df = load_data()
 
-    user_embeddings, item_embeddings, num_users, num_products, _, _ = update_df_and_get_als(reviews_df, n_factors=100)
+    user_embeddings, item_embeddings, num_users, num_products, _, _ = update_df_and_get_als(reviews_df, n_factors=10)
 
     # Split the dataset into training and validation sets
     dataset = ReviewDataset(reviews_df)
@@ -265,15 +277,15 @@ if __name__ == '__main__':
         num_products=num_products,
         embedding_dim=300,  # GloVe embedding size
         n_filters=100,
-        filter_sizes=[3, 4, 5],  # fuzzy n-gram sizes
-        user_emb_dim=100,
-        product_emb_dim=100,
+        filter_sizes=[3, 4, 5, 7],  # fuzzy n-gram sizes
+        user_emb_dim=10,
+        product_emb_dim=10,
         output_dim=5,  # Ratings from 0 to 4
         dropout=0.4,
-        user_embedding_weights=torch.tensor(user_embeddings,
-                                            dtype=torch.float32),
-        product_embedding_weights=torch.tensor(item_embeddings,
-                                            dtype=torch.float32)
+        # user_embedding_weights=torch.tensor(user_embeddings,
+        #                                     dtype=torch.float32),
+        # product_embedding_weights=torch.tensor(item_embeddings,
+        #                                     dtype=torch.float32)
     )
 
     early_stopping = EarlyStopping(monitor='val_acc', patience=5, mode='max')
