@@ -22,8 +22,8 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint', type=str, default=None, help="Path to the checkpoint file")
     args = parser.parse_args()
 
-    cull_unknown_threshold = 2
-    user_product_embed_size = 10
+    cull_unknown_threshold = 3
+    user_product_embed_size = 15
     als_iterations = 10
     als_regularization = 0.1
 
@@ -63,16 +63,16 @@ if __name__ == '__main__':
         num_products=num_products,
         embedding_dim=300,  # GloVe embedding size
         n_filters=100,
-        filter_sizes=[3, 4, 5, 7],  # fuzzy n-gram sizes
+        filter_sizes=[3, 4, 5, 6, 7, 8],  # fuzzy n-gram sizes
         user_emb_dim=user_product_embed_size,
         product_emb_dim=user_product_embed_size,
         output_dim=5,  # Ratings from 0 to 4
-        dropout=0.4,
+        dropout=0.7,
         user_embedding_weights=torch.tensor(user_embeddings, dtype=torch.float32),
         product_embedding_weights=torch.tensor(item_embeddings, dtype=torch.float32),
-        blend_factor=0.9,  # Adjust to taste :P
-        unfreeze_epoch=10,
-        weight_decay=1e-2,
+        blend_factor=0.1,  # Adjust to taste :P
+        unfreeze_epoch=4,
+        weight_decay=2e-2,
         extern_params={
             'als_factors': user_product_embed_size,
             'als_iterations': als_iterations,
