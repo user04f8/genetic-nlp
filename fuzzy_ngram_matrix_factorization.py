@@ -241,7 +241,7 @@ def evaluate_model(model, dataloader):
     total_count = 0
     for batch in dataloader:
         with torch.no_grad():
-            outputs = model(batch['text'], batch['summary'], batch['user'], batch['product'])
+            outputs = model(batch['text'], batch['summary'], batch['user'], batch['product'], batch['helpfulness_ratio'], batch['log_helpfulness_denominator'])
             predictions = outputs.argmax(1)
             total_correct += (predictions == batch['label']).sum().item()
             total_count += batch['label'].size(0)
