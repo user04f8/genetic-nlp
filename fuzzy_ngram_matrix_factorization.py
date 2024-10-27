@@ -146,8 +146,8 @@ class SentimentModel(pl.LightningModule):
         self.user_embedding = nn.Embedding(num_users, user_emb_dim)
         self.product_embedding = nn.Embedding(num_products, product_emb_dim)
 
-        # Fully Connected Layer
-        self.fc = nn.Linear(len(filter_sizes)*n_filters*2 + user_emb_dim + product_emb_dim, output_dim)
+        # Feature weighting
+        self.feature_weights = nn.Linear(len(filter_sizes)*n_filters*2 + user_emb_dim + product_emb_dim, output_dim)
 
         self.dropout = nn.Dropout(dropout)
         self.learning_rate = learning_rate
@@ -185,10 +185,7 @@ class SentimentModel(pl.LightningModule):
 
         combined = self.dropout(combined)
 
-        # Final output
-        output = self.fc(combined)
-
-        return output
+        return F.softmax(self.feature_weights(combined), dim=1)
 
     def training_step(self, batch, batch_idx):
         outputs = self.forward(batch['text'], batch['summary'], batch['user'], batch['product'])
