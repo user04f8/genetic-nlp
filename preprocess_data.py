@@ -2,23 +2,61 @@ import os
 import zipfile
 import numpy as np
 import pandas as pd
-import tiktoken
+from gensim.models import KeyedVectors
 from multiprocessing import Pool, cpu_count
 
 data_dir = './data/'
 train_parquet_path = os.path.join(data_dir, 'train_data.parquet')
 test_parquet_path = os.path.join(data_dir, 'test_data.parquet')
 
-def tokenize_column(text):
-    tokenizer = tiktoken.get_encoding("gpt2")
-    return tokenizer.encode(text) if pd.notnull(text) else []
+# Load GloVe embeddings
+glove_path = 'glove.840B.300d.word2vec.bin'
+glove_model = None
+glove_vocab = None
+glove_embedding_matrix = None
 
-def parallel_tokenize(column_data):
+def load_glove():
+    global glove_model, glove_vocab
+    if glove_model is None:
+        print('Loading GloVe... ', end="")
+        glove_model = KeyedVectors.load_word2vec_format(glove_path, binary=True, limit=1500000)
+        glove_vocab = {word: idx for idx, word in enumerate(glove_model.index_to_key)}
+        print('Done!')
+
+def get_glove(freeze=True):
+    global glove_embedding_matrix
+    import torch
+    load_glove()
+
+    if glove_embedding_matrix is None:
+        vocab_size = len(glove_model.key_to_index)  # Number of words in GloVe
+        embedding_dim = glove_model.vector_size  # 300 in the case of GloVe 300d
+
+        # Create embedding matrix (vocab_size x embedding_dim)
+        embedding_matrix = torch.zeros((vocab_size, embedding_dim))
+
+        for i, word in enumerate(glove_model.key_to_index):
+            embedding_matrix[i] = torch.tensor(glove_model[word])
+
+    # Use the embedding matrix with PyTorch nn.Embedding
+    return torch.nn.Embedding.from_pretrained(embedding_matrix, freeze=freeze)
+
+# Tokenization function for GloVe
+def glove_tokenize(text):
+    if pd.notnull(text):
+        tokens = text.lower().split()  # Simple whitespace-based tokenization
+        token_indices = [glove_vocab.get(token, glove_vocab.get('<unk>', 0)) for token in tokens]
+        return token_indices
+    return []  # Return empty list for None or NaN values
+
+def parallel_glove_tokenize(column_data):
     with Pool(cpu_count()) as pool:
-        tokens = pool.map(tokenize_column, column_data)
+        tokens = pool.map(glove_tokenize, column_data)
     return tokens
 
 def preprocess():
+    load_glove()
+
     train_path = os.path.join(data_dir, 'train.csv')
     test_path = os.path.join(data_dir, 'test.csv')
 
@@ -56,11 +94,18 @@ def preprocess():
     train_df = train_df[train_df['Score'].notnull()]
 
     print('Tokenizing in parallel...')
-    train_df['Summary_tokens'] = parallel_tokenize(train_df['Summary'])
-    train_df['Text_tokens'] = parallel_tokenize(train_df['Text'])
+    train_df['Summary_glove_tokens'] = parallel_glove_tokenize(train_df['Summary'])
+    train_df['Text_glove_tokens'] = parallel_glove_tokenize(train_df['Text'])
 
-    test_df['Summary_tokens'] = parallel_tokenize(test_df['Summary'])
-    test_df['Text_tokens'] = parallel_tokenize(test_df['Text'])
+    test_df['Summary_glove_tokens'] = parallel_glove_tokenize(test_df['Summary'])
+    test_df['Text_glove_tokens'] = parallel_glove_tokenize(test_df['Text'])
+
+    # Convert token lists to numpy arrays for efficient storage
+    train_df['Summary_glove_tokens_np'] = train_df['Summary_glove_tokens'].apply(lambda x: np.array(x, dtype=np.int32))
+    train_df['Text_glove_tokens_np'] = train_df['Text_glove_tokens'].apply(lambda x: np.array(x, dtype=np.int32))
+
+    test_df['Summary_glove_tokens_np'] = test_df['Summary_glove_tokens'].apply(lambda x: np.array(x, dtype=np.int32))
+    test_df['Text_glove_tokens_np'] = test_df['Text_glove_tokens'].apply(lambda x: np.array(x, dtype=np.int32))
 
     print('Saving dataset as Parquet...')
     train_df.to_parquet(train_parquet_path, compression='snappy')

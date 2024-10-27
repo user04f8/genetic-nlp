@@ -16,7 +16,6 @@ import json
 
 from pytorch_lightning.callbacks import LearningRateMonitor, EarlyStopping
 from pytorch_lightning.loggers import CSVLogger
-from pytorch_lightning.callbacks.progress import TQDMProgressBar
 
 from utils import preprocess_data, get_train_val_split
 from preprocess_data import load_data
@@ -37,9 +36,9 @@ parser.add_argument('--model_id', type=str, default='model_0')
 parser.add_argument('--epochs', type=int, default=15)
 parser.add_argument('--optimizer_type', type=str, default='adam')
 parser.add_argument('--weight_decay', type=float, default=0.0)
-parser.add_argument('--activation_function', type=str, default='relu')
+parser.add_argument('--nonlinear_transform', type=str, default='relu')
 parser.add_argument('--dropout_rate', type=float, default=0.0)
-parser.add_argument('--num_layers', type=int, default=1)
+parser.add_argument('--pooling_type', type=str, default='mean')
 args = parser.parse_args()
 
 # Set random seed based on model_id
@@ -147,39 +146,36 @@ class ReviewClassifier(pl.LightningModule):
         model_id='model_0',
         optimizer_type='adam',
         weight_decay=0.0,
-        activation_function='relu',
+        nonlinear_transform='relu',
         dropout_rate=0.0,
-        num_layers=1,
+        pooling_type='mean',
+        batch_size=512
     ):
         super().__init__()
         self.save_hyperparameters()
         self.embedding = nn.Embedding(vocab_size, embedding_dim)
 
-        # Activation function
-        if activation_function == 'relu':
-            self.activation = nn.ReLU()
-        elif activation_function == 'tanh':
-            self.activation = nn.Tanh()
-        elif activation_function == 'gelu':
-            self.activation = nn.GELU()
+        # Nonlinear transformation
+        if nonlinear_transform == 'relu':
+            self.nonlinear = nn.ReLU()
+        elif nonlinear_transform == 'tanh':
+            self.nonlinear = nn.Tanh()
+        elif nonlinear_transform == 'gelu':
+            self.nonlinear = nn.GELU()
         else:
-            raise ValueError(f"Unknown activation function {activation_function}")
+            raise ValueError(f"Unknown nonlinear transform {nonlinear_transform}")
 
-        # Dropout
         self.dropout = nn.Dropout(dropout_rate)
 
-        # Build layers
-        layers = []
-        input_dim = embedding_dim
-        for _ in range(num_layers):
-            layers.append(nn.Linear(input_dim, latent_dim))
-            layers.append(self.activation)
-            layers.append(self.dropout)
-            input_dim = latent_dim
-        self.latent_layers = nn.Sequential(*layers)
+        # Attention mechanism if pooling_type is 'attention'
+        if pooling_type == 'attention':
+            self.attention_weights = nn.Linear(embedding_dim, 1)
+
+        # Latent layer
+        self.latent_layer = nn.Linear(embedding_dim, latent_dim)
 
         # Output layer
-        self.output_layer = nn.Linear(input_dim, num_classes)
+        self.output_layer = nn.Linear(latent_dim, num_classes)
 
         self.lr = lr
         self.scheduler_type = scheduler_type
@@ -187,19 +183,48 @@ class ReviewClassifier(pl.LightningModule):
         self.max_steps = max_steps
         self.optimizer_type = optimizer_type
         self.weight_decay = weight_decay
+        self.pooling_type = pooling_type
 
         # For storing validation outputs
         self.validation_accs = []
+
+        # Save hyperparameters for status reporting
+        self.hyperparameters = {
+            'embedding_dim': embedding_dim,
+            'latent_dim': latent_dim,
+            'lr': lr,
+            'batch_size': self.hparams.batch_size,
+            'max_length': self.hparams.max_length,
+            'scheduler_type': scheduler_type,
+            'optimizer_type': optimizer_type,
+            'weight_decay': weight_decay,
+            'nonlinear_transform': nonlinear_transform,
+            'dropout_rate': dropout_rate,
+            'pooling_type': pooling_type,
+            'model_id': model_id,
+            'epochs': self.hparams.epochs,
+        }
 
     def forward(self, x):
         # x: batch_size x seq_length
         embedded = self.embedding(x)  # batch_size x seq_length x embedding_dim
 
-        # Global average pooling
-        pooled = embedded.mean(dim=1)  # batch_size x embedding_dim
+        if self.pooling_type == 'mean':
+            # Mean pooling
+            pooled = embedded.mean(dim=1)  # batch_size x embedding_dim
+        elif self.pooling_type == 'max':
+            # Max pooling
+            pooled, _ = embedded.max(dim=1)
+        elif self.pooling_type == 'attention':
+            # Attention pooling
+            attn_scores = self.attention_weights(embedded).squeeze(-1)  # batch_size x seq_length
+            attn_weights = F.softmax(attn_scores, dim=1).unsqueeze(-1)  # batch_size x seq_length x 1
+            pooled = torch.sum(embedded * attn_weights, dim=1)  # batch_size x embedding_dim
+        else:
+            raise ValueError(f"Unknown pooling type {self.pooling_type}")
 
-        # Pass through latent layers
-        latent = self.latent_layers(pooled)
+        # Apply nonlinear transformation and dropout
+        latent = self.dropout(self.nonlinear(self.latent_layer(pooled)))
 
         # Output logits
         logits = self.output_layer(latent)  # batch_size x num_classes
@@ -237,8 +262,8 @@ class ReviewClassifier(pl.LightningModule):
             'model_id': self.hparams.model_id,
             'epoch': self.current_epoch,
             'val_acc': avg_val_acc,
-            'hyperparameters': vars(self.hparams)
-            # Include any other relevant information
+            'hyperparameters': self.hyperparameters,
+            # You can include any other relevant information
         }
 
         os.makedirs('status', exist_ok=True)
@@ -333,9 +358,10 @@ if __name__ == '__main__':
         model_id=args.model_id,
         optimizer_type=args.optimizer_type,
         weight_decay=args.weight_decay,
-        activation_function=args.activation_function,
+        nonlinear_transform=args.nonlinear_transform,
         dropout_rate=args.dropout_rate,
-        num_layers=args.num_layers,
+        pooling_type=args.pooling_type,
+        batch_size=args.batch_size
     )
 
     # Define callbacks
@@ -369,3 +395,4 @@ if __name__ == '__main__':
 
     # Save the final model checkpoint
     save_model_checkpoint(trainer, model)
+    

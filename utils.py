@@ -1,5 +1,10 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
+import random
+import numpy as np
+import pytorch_lightning as pl
+import torch
+import torch.backends.cudnn as cudnn
 
 def preprocess_data(df):
     """
@@ -35,6 +40,17 @@ def get_train_val_split(df, test_size=0.2, random_state=42):
     print("")
 
     return train_df, val_df
+
+def seed_everything(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    pl.seed_everything(seed, workers=True)
+    
+    # Ensure deterministic behavior for cuDNN
+    cudnn.deterministic = True
+    cudnn.benchmark = False
 
 # Example usage:
 if __name__ == "__main__":

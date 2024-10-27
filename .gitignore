@@ -8,5 +8,7 @@ dev/host_notebook.sh
 data/
 diagrams/
 logs/
+lightning_logs/
 
 glove.840B.300d.word2vec.bin
+glove.42B.300d.zip

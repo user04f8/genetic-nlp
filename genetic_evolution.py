@@ -6,19 +6,19 @@ import threading
 import shutil
 import json
 
-# Define hyperparameter ranges
+# Define hyperparameter ranges with integer ranges and more options
 hyperparameter_space = {
-    'embedding_dim': [100, 200, 300, 400, 500],
-    'latent_dim': [2, 3, 4, 5],
+    'embedding_dim': list(range(50, 501, 50)),  # 50 to 500 with steps of 50
+    'latent_dim': list(range(2, 11)),  # 2 to 10
     'lr': [1e-5, 1e-4, 1e-3, 1e-2],
-    'batch_size': [128, 256, 512, 1024],
+    'batch_size': [64, 128, 256, 512, 1024],
     'max_length': [64, 128, 256, 512],
     'scheduler_type': ['cosine', 'reduce_on_plateau', 'step_lr'],
     'optimizer_type': ['adam', 'sgd', 'rmsprop'],
     'weight_decay': [0, 1e-5, 1e-4, 1e-3],
-    'activation_function': ['relu', 'tanh', 'gelu'],
+    'nonlinear_transform': ['relu', 'tanh', 'gelu'],
     'dropout_rate': [0.0, 0.1, 0.2, 0.3],
-    'num_layers': [1, 2, 3, 4],
+    'pooling_type': ['mean', 'max', 'attention'],
 }
 
 def generate_hyperparameters():
@@ -27,7 +27,7 @@ def generate_hyperparameters():
 def mutate_hyperparameters(parent_hyperparameters):
     hyperparameters = parent_hyperparameters.copy()
     # Randomly mutate one or more of the hyperparameters
-    num_mutations = random.randint(1, 3)  # mutate 1 to 3 hyperparameters
+    num_mutations = random.randint(1, 3)  # Mutate 1 to 3 hyperparameters
     for _ in range(num_mutations):
         param_to_mutate = random.choice(list(hyperparameters.keys()))
         hyperparameters[param_to_mutate] = random.choice(hyperparameter_space[param_to_mutate])
@@ -53,9 +53,9 @@ def launch_model(model_id, hyperparameters, gpu_id):
         f'--scheduler_type={hyperparameters["scheduler_type"]}',
         f'--optimizer_type={hyperparameters["optimizer_type"]}',
         f'--weight_decay={hyperparameters["weight_decay"]}',
-        f'--activation_function={hyperparameters["activation_function"]}',
+        f'--nonlinear_transform={hyperparameters["nonlinear_transform"]}',
         f'--dropout_rate={hyperparameters["dropout_rate"]}',
-        f'--num_layers={hyperparameters["num_layers"]}',
+        f'--pooling_type={hyperparameters["pooling_type"]}',
         f'--model_id={model_id}',
         '--epochs=15',
     ]
@@ -96,7 +96,7 @@ for i in range(population_size):
         'process': process,
         'hyperparameters': hyperparameters,
         'epoch': 0,
-        'age': 0,  # number of evaluation rounds survived
+        'age': 0,  # Number of evaluation rounds survived
         'status': None,
     })
 
@@ -131,14 +131,11 @@ for eval_round in range(max_rounds):
         model_scores.append({'model': model, 'val_acc': val_acc})
 
     # Adjust selection probabilities based on age
-    # For example, protect younger models
     num_survivors = len(model_scores) // 2
     # Sort models by val_acc
     model_scores.sort(key=lambda x: x['val_acc'], reverse=True)
 
     # Apply age-based weighting
-    # For example, models with age == 0 have a higher chance to survive
-    # Let's select the top 50%, but ensure that all models with age == 0 survive
     survivors = []
     eliminated = []
     young_models = [m for m in model_scores if m['model']['age'] == 0]
@@ -208,7 +205,7 @@ for eval_round in range(max_rounds):
     # Update epochs and age for survivors
     for survivor in survivors:
         survivor['model']['epoch'] += epochs_per_evaluation
-        survivor['model']['age'] += 1  # survived another round
+        survivor['model']['age'] += 1  # Survived another round
 
 # Wait for final models to finish training
 print("Final training phase. Waiting for all models to complete.")
