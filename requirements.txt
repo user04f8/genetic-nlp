@@ -5,6 +5,7 @@ tiktoken
 gensim
 pytorch_lightning
 implicit
+joblib
 
 # the below are just if you want to see some of the exploratory experiments
 optuna

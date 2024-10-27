@@ -1,11 +1,9 @@
-# train_model.py
-
 import argparse
-import numpy as np
 import torch
 from torch.utils.data import DataLoader, random_split
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
 
 from data_processor import DataProcessor, ReviewDataset, collate_fn
 from fuzzy_ngram_matrix_factors_model import SentimentModel
@@ -25,13 +23,20 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Load the data
-    reviews_df, test_df = load_data()
+    reviews_df, _ = load_data()
 
-    # Initialize DataProcessor and fit encoders
-    data_processor = DataProcessor()
-    data_processor.fit_encoders(reviews_df)
+    # Initialize DataProcessor and set encoders
+    data_processor = DataProcessor(no_unknowns=True, unknown_threshold=0)
+
+    user_product_embed_size = 40
+
+    # Generate ALS embeddings and update DataFrame
+    user_embeddings, item_embeddings, num_users, num_products = update_df_and_get_als(
+        reviews_df, data_processor, n_factors=user_product_embed_size, n_iterations=10, cache_dir='./cache/'
+    )
+
+    # Process reviews_df to include 'user_idx' and 'product_idx'
     reviews_df = data_processor.process_reviews(reviews_df, is_training=True)
-    num_users, num_products = data_processor.get_num_users_products()
 
     # Prepare the dataset and dataloaders
     dataset = ReviewDataset(reviews_df)
@@ -47,19 +52,21 @@ if __name__ == '__main__':
         val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=8, pin_memory=True
     )
 
-    # Initialize the model
+    # Initialize the model with blend_factor and unfreeze_epoch
     model = SentimentModel(
         num_users=num_users,
         num_products=num_products,
         embedding_dim=300,  # GloVe embedding size
         n_filters=100,
         filter_sizes=[3, 4, 5, 7],  # fuzzy n-gram sizes
-        user_emb_dim=50,
-        product_emb_dim=50,
+        user_emb_dim=user_product_embed_size,
+        product_emb_dim=user_product_embed_size,
         output_dim=5,  # Ratings from 0 to 4
         dropout=0.4,
-        # user_embedding_weights=torch.tensor(user_embeddings, dtype=torch.float32),
-        # product_embedding_weights=torch.tensor(item_embeddings, dtype=torch.float32)
+        user_embedding_weights=torch.tensor(user_embeddings, dtype=torch.float32),
+        product_embedding_weights=torch.tensor(item_embeddings, dtype=torch.float32),
+        blend_factor=0.0,  # Adjust to taste :P
+        unfreeze_epoch=0,
     )
 
     # Callbacks
@@ -73,6 +80,8 @@ if __name__ == '__main__':
         save_last=True,
     )
 
+    logger = TensorBoardLogger("lightning_logs", name="legacy_test_old_params")
+
     # Trainer
     trainer = Trainer(
         max_epochs=100,
@@ -84,6 +93,7 @@ if __name__ == '__main__':
             lr_monitor,
             checkpoint_callback
         ],
+        logger=logger
     )
 
     # Train the model

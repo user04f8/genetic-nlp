@@ -5,13 +5,33 @@ import pytorch_lightning as pl
 from preprocess_data import get_glove
 
 class SentimentModel(pl.LightningModule):
-    def __init__(self, num_users, num_products, embedding_dim=300, n_filters=100, filter_sizes=[3,4,5], 
-                 user_emb_dim=50, product_emb_dim=50, output_dim=5, dropout=0.5, learning_rate=1e-3, 
-                 user_embedding_weights=None, product_embedding_weights=None, als_freeze=False, latent_user_product_dim=25,
-                 enable_user_product_dim_reduce=False, no_load_glove=False):
+    def __init__(
+        self,
+        num_users,
+        num_products,
+        embedding_dim=300,
+        n_filters=100,
+        filter_sizes=[3, 4, 5],
+        user_emb_dim=50,
+        product_emb_dim=50,
+        output_dim=5,
+        dropout=0.5,
+        learning_rate=1e-3,
+        user_embedding_weights=None,
+        product_embedding_weights=None,
+        als_freeze=False,
+        latent_user_product_dim=25,
+        enable_user_product_dim_reduce=False,
+        no_load_glove=False,
+        blend_factor=0.5,
+        unfreeze_epoch=5,  # Unfreeze after 5 epochs
+    ):
         super(SentimentModel, self).__init__()
 
-        self.save_hyperparameters()
+        # Save hyperparameters, excluding large embedding weights
+        self.save_hyperparameters(
+            ignore=['user_embedding_weights', 'product_embedding_weights']
+        )
 
         if no_load_glove:
             self.embedding = nn.Identity()
@@ -27,31 +47,73 @@ class SentimentModel(pl.LightningModule):
             for fs in filter_sizes
         ])
 
+        # Initialize User and Product Embeddings
         if user_embedding_weights is not None:
-            if (user_embedding_weights.shape[1] != user_emb_dim) or (product_embedding_weights.shape[1] != product_emb_dim):
+            # Ensure embedding dimensions match
+            if user_embedding_weights.shape[1] != user_emb_dim or product_embedding_weights.shape[1] != product_emb_dim:
                 print("WARNING, emb_dim appears mismatched: ", user_emb_dim, product_emb_dim)
                 user_emb_dim = user_embedding_weights.shape[1]
                 product_emb_dim = product_embedding_weights.shape[1]
-            self.user_embedding = nn.Embedding.from_pretrained(embeddings=user_embedding_weights, freeze=als_freeze)
-            self.product_embedding = nn.Embedding.from_pretrained(embeddings=product_embedding_weights, freeze=als_freeze)
+
+            # Pre-trained embeddings
+            self.user_embedding_pretrained = nn.Embedding.from_pretrained(
+                embeddings=user_embedding_weights, freeze=als_freeze
+            )
+            self.product_embedding_pretrained = nn.Embedding.from_pretrained(
+                embeddings=product_embedding_weights, freeze=als_freeze
+            )
+
+            # Random embeddings
+            self.user_embedding_random = nn.Embedding(num_users, user_emb_dim)
+            self.product_embedding_random = nn.Embedding(num_products, product_emb_dim)
         else:
-            self.user_embedding = nn.Embedding(num_users, user_emb_dim)
-            self.product_embedding = nn.Embedding(num_products, product_emb_dim)
-        
+            # If no pre-trained embeddings, use only random embeddings
+            self.user_embedding_random = nn.Embedding(num_users, user_emb_dim)
+            self.product_embedding_random = nn.Embedding(num_products, product_emb_dim)
+            self.user_embedding_pretrained = None
+            self.product_embedding_pretrained = None
+
+        self.blend_factor = blend_factor  # Store blend factor as a hyperparameter
+        self.unfreeze_epoch = unfreeze_epoch  # Store unfreeze epoch as a hyperparameter
+
         self.enable_user_product_dim_reduce = enable_user_product_dim_reduce
         if self.enable_user_product_dim_reduce:
-            self.user_product_dim_reduction = nn.Linear(user_emb_dim + product_emb_dim, latent_user_product_dim)
+            self.user_product_dim_reduction = nn.Linear(
+                user_emb_dim + product_emb_dim, latent_user_product_dim
+            )
             self.user_product_pool = F.relu
+            combined_user_product_dim = latent_user_product_dim
         else:
             self.user_product_dim_reduction = nn.Identity()
             self.user_product_pool = nn.Identity()
-            latent_user_product_dim = user_emb_dim + product_emb_dim
+            combined_user_product_dim = user_emb_dim + product_emb_dim
 
         # Feature weighting
-        self.feature_weights = nn.Linear(len(filter_sizes)*n_filters*2 + latent_user_product_dim + 2, output_dim)
+        self.feature_weights = nn.Linear(
+            len(filter_sizes) * n_filters * 2 + combined_user_product_dim + 2, output_dim
+        )
 
         self.dropout = nn.Dropout(dropout)
         self.learning_rate = learning_rate
+
+        # Initially freeze embeddings
+        self._freeze_embeddings()
+
+    def _freeze_embeddings(self):
+        # Initially freeze all embedding parameters
+        if self.user_embedding_pretrained is not None:
+            self.user_embedding_pretrained.weight.requires_grad = False
+            self.product_embedding_pretrained.weight.requires_grad = False
+        self.user_embedding_random.weight.requires_grad = False
+        self.product_embedding_random.weight.requires_grad = False
+
+    def _unfreeze_embeddings(self):
+        # Unfreeze embedding parameters
+        if self.user_embedding_pretrained is not None:
+            self.user_embedding_pretrained.weight.requires_grad = True
+            self.product_embedding_pretrained.weight.requires_grad = True
+        self.user_embedding_random.weight.requires_grad = True
+        self.product_embedding_random.weight.requires_grad = True
 
     def forward(self, text, summary, user_idx, product_idx, helpfulness_ratio, log_helpfulness_denominator):
         # Text Embedding
@@ -78,17 +140,33 @@ class SentimentModel(pl.LightningModule):
         text_cat = self.dropout(text_cat)
 
         # User and Product Embeddings
-        user_embedded = self.user_embedding(user_idx)  # [batch_size, user_emb_dim]
-        product_embedded = self.product_embedding(product_idx)  # [batch_size, product_emb_dim]
+        # Get embeddings from both pre-trained and random embeddings
+        if self.user_embedding_pretrained is not None:
+            user_embedded_pretrained = self.user_embedding_pretrained(user_idx)
+            product_embedded_pretrained = self.product_embedding_pretrained(product_idx)
+            user_embedded_random = self.user_embedding_random(user_idx)
+            product_embedded_random = self.product_embedding_random(product_idx)
+
+            # Blend the embeddings
+            user_embedded = self.blend_factor * user_embedded_pretrained + \
+                            (1 - self.blend_factor) * user_embedded_random
+            product_embedded = self.blend_factor * product_embedded_pretrained + \
+                               (1 - self.blend_factor) * product_embedded_random
+        else:
+            # Use only random embeddings
+            user_embedded = self.user_embedding_random(user_idx)
+            product_embedded = self.product_embedding_random(product_idx)
 
         # Ensure helpfulness_ratio and log_helpfulness_denominator are 2D tensors
         helpfulness_ratio = helpfulness_ratio.unsqueeze(1)                      # [batch_size, 1]
         log_helpfulness_denominator = log_helpfulness_denominator.unsqueeze(1)  # [batch_size, 1]
-        
-        # Concatenate all features
+
+        # Combine user and product embeddings
         user_product_features = self.user_product_pool(
             self.user_product_dim_reduction(torch.cat([user_embedded, product_embedded], dim=1))
         )
+
+        # Concatenate all features
         combined = torch.cat(
             [text_cat, user_product_features, helpfulness_ratio, log_helpfulness_denominator], dim=1
         )
@@ -120,8 +198,12 @@ class SentimentModel(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=2)
+        optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.parameters()), lr=self.learning_rate
+        )
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.2, patience=2
+        )
         return {
             'optimizer': optimizer,
             'lr_scheduler': {
@@ -130,6 +212,17 @@ class SentimentModel(pl.LightningModule):
                 'frequency': 1,
             }
         }
+
+    def on_train_epoch_start(self):
+        # Unfreeze embeddings after unfreeze_epoch
+        if self.current_epoch == self.unfreeze_epoch:
+            self._unfreeze_embeddings()
+            # Reconfigure optimizer to include new parameters
+            optimizer = torch.optim.Adam(
+                filter(lambda p: p.requires_grad, self.parameters()), lr=self.learning_rate
+            )
+            self.trainer.optimizers = [optimizer]
+            print(f"Unfreezing embeddings at epoch {self.current_epoch}")
 
     def on_save_checkpoint(self, checkpoint):
         """Exclude the GloVe embeddings from the checkpoint."""

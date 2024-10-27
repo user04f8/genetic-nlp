@@ -1,5 +1,6 @@
 import os
 import pickle
+import joblib
 import numpy as np
 import pandas as pd
 import implicit
@@ -8,7 +9,7 @@ from sklearn.preprocessing import LabelEncoder
 
 from preprocess_data import load_data
 
-def update_df_and_get_als(reviews_df, n_factors=100, n_iterations=10, cache_dir='./cache/'):
+def update_df_and_get_als(reviews_df, data_processor, n_factors=100, n_iterations=10, cache_dir='./cache/'):
     os.makedirs(cache_dir, exist_ok=True)
 
     # Define cache file paths
@@ -30,17 +31,24 @@ def update_df_and_get_als(reviews_df, n_factors=100, n_iterations=10, cache_dir=
             num_users = pickle.load(f)
         with open(num_products_path, 'rb') as f:
             num_products = pickle.load(f)
-        with open(user_encoder_path, 'rb') as f:
-            user_encoder = pickle.load(f)
-        with open(product_encoder_path, 'rb') as f:
-            product_encoder = pickle.load(f)
-
-        # Use the encoders to transform UserId and ProductId
-        reviews_df['user_idx'] = user_encoder.transform(reviews_df['UserId'])
-        reviews_df['product_idx'] = product_encoder.transform(reviews_df['ProductId'])
+        data_processor.user_encoder = joblib.load(user_encoder_path)
+        data_processor.product_encoder = joblib.load(product_encoder_path)
     else:
         print('Computing ALS outputs...')
-        user_embeddings, item_embeddings, num_users, num_products, user_encoder, product_encoder = compute_als(reviews_df, n_factors, n_iterations)
+
+        # Process reviews to get encoded indices
+        reviews_df = data_processor.process_reviews(reviews_df, is_training=True)
+        user_indices = reviews_df['user_idx'].values
+        product_indices = reviews_df['product_idx'].values
+        ratings = reviews_df['Score'].values.astype(np.float32)
+
+        num_users = data_processor.num_users
+        num_products = data_processor.num_products
+
+        user_embeddings, item_embeddings = compute_als(
+            user_indices, product_indices, ratings, num_users, num_products,
+            n_factors, n_iterations
+        )
 
         # Save outputs to cache
         np.save(user_emb_path, user_embeddings)
@@ -49,31 +57,14 @@ def update_df_and_get_als(reviews_df, n_factors=100, n_iterations=10, cache_dir=
             pickle.dump(num_users, f)
         with open(num_products_path, 'wb') as f:
             pickle.dump(num_products, f)
-        with open(user_encoder_path, 'wb') as f:
-            pickle.dump(user_encoder, f)
-        with open(product_encoder_path, 'wb') as f:
-            pickle.dump(product_encoder, f)
+        joblib.dump(data_processor.user_encoder, user_encoder_path)
+        joblib.dump(data_processor.product_encoder, product_encoder_path)
 
-    return user_embeddings, item_embeddings, num_users, num_products, user_encoder, product_encoder
+    return user_embeddings, item_embeddings, num_users, num_products
 
-def compute_als(reviews_df, n_factors, n_iterations=10, regularization=0.4):
-    # Map UserId and ProductId to integer indices
-    user_encoder = LabelEncoder()
-    product_encoder = LabelEncoder()
-
-    reviews_df['user_idx'] = user_encoder.fit_transform(reviews_df['UserId'])
-    reviews_df['product_idx'] = product_encoder.fit_transform(reviews_df['ProductId'])
-
-    num_users = len(user_encoder.classes_)
-    num_products = len(product_encoder.classes_)
-
+def compute_als(user_indices, product_indices, ratings, num_users, num_products, n_factors, n_iterations=10, regularization=0.4):
     print(f"Number of users: {num_users}")
     print(f"Number of products: {num_products}")
-
-    # Create the interaction matrix
-    user_indices = reviews_df['user_idx'].values
-    product_indices = reviews_df['product_idx'].values
-    ratings = reviews_df['Score'].values.astype(np.float32)
 
     # Build the sparse interaction matrix in COO format
     interaction_matrix = coo_matrix(
@@ -100,7 +91,7 @@ def compute_als(reviews_df, n_factors, n_iterations=10, regularization=0.4):
     user_embeddings = als_model.user_factors  # Shape: (num_users, factors)
     item_embeddings = als_model.item_factors  # Shape: (num_products, factors)
 
-    user_embeddings, item_embeddings = item_embeddings, user_embeddings  # swap due to library implementation issue
-    # NOTE: this was a fun 2-hour debugging adventure. Something with implicit's handling of the csr matrix above is a bit interesting...
+    # Swap embeddings due to library implementation issue
+    user_embeddings, item_embeddings = item_embeddings, user_embeddings
 
-    return user_embeddings, item_embeddings, num_users, num_products, user_encoder, product_encoder
+    return user_embeddings, item_embeddings
