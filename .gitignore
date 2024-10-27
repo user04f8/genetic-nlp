@@ -10,7 +10,11 @@ dev/host_notebook.sh
 data/
 diagrams/
 logs/
-lightning_logs/
+lightning_logs/*
+!lightning_logs/version_64/
+!lightning_logs/version_64/**
+!lightning_logs/heavy_regularization/version_1/
+!lightning_logs/heavy_regularization/version_1/**
 
 glove.840B.300d.word2vec.bin
 glove.42B.300d.zip
