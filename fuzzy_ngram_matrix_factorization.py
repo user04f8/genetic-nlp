@@ -143,8 +143,10 @@ class SentimentModel(pl.LightningModule):
         ])
 
         # User and Product Embeddings
-        self.user_embedding = nn.Embedding(num_users, user_emb_dim)
-        self.product_embedding = nn.Embedding(num_products, product_emb_dim)
+        # self.user_embedding = nn.Embedding(num_users, user_emb_dim)
+        # self.product_embedding = nn.Embedding(num_products, product_emb_dim)
+        self.user_embedding = nn.Embedding.from_pretrained(torch.tensor(np.load(f'als_embeddings/user_embeddings_{user_emb_dim}')), freeze=True)
+        self.product_embedding = nn.Embedding.from_pretrained(torch.tensor(np.load(f'als_embeddings/product_embeddings_{user_emb_dim}')), freeze=True)
 
         # Feature weighting
         self.feature_weights = nn.Linear(len(filter_sizes)*n_filters*2 + user_emb_dim + product_emb_dim, output_dim)
@@ -181,11 +183,12 @@ class SentimentModel(pl.LightningModule):
         product_embedded = self.product_embedding(product_idx)
 
         # Concatenate all features
-        combined = torch.cat([text_cat, user_embedded, product_embedded], dim=1)
+        # combined = torch.cat([text_cat, user_embedded, product_embedded], dim=1)
+        combined = torch.cat([user_embedded, product_embedded], dim=1)
 
         combined = self.dropout(combined)
 
-        return F.softmax(self.feature_weights(combined), dim=1)
+        return self.feature_weights(combined)
 
     def training_step(self, batch, batch_idx):
         outputs = self.forward(batch['text'], batch['summary'], batch['user'], batch['product'])
