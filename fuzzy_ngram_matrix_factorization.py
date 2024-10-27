@@ -246,12 +246,13 @@ early_stopping = EarlyStopping(monitor='val_acc', patience=5, mode='max')
 lr_monitor = LearningRateMonitor(logging_interval='epoch')
 
 checkpoint_callback = ModelCheckpoint(
+    # dirpath='checkpoints/fuzzy_ngram',        # Directory to save checkpoints
+    # filename='best_model_version_30',        # Filename for the checkpoint
+    save_weights_only=True,
     monitor='val_acc',            # Monitored metric
-    dirpath='checkpoints/fuzzy_ngram',        # Directory to save checkpoints
-    filename='best_model_version_30',        # Filename for the checkpoint
-    save_top_k=2,                 # Save only the best model
     mode='max',                   # Mode for the monitored metric ('min' or 'max')
-    save_weights_only=True        # Save only the model's weights (state_dict)
+    save_top_k=1,
+    save_last=True,
 )
 
 trainer = Trainer(

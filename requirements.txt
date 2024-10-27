@@ -2,6 +2,12 @@ torch
 pandas
 numpy
 tiktoken
-optuna
+gensim
 pytorch_lightning
+implicit
+
+# the below are just if you want to see some of the exploratory experiments
+optuna
 optuna-integration[pytorch_lightning]
+tensorboard
+tensorboardx
