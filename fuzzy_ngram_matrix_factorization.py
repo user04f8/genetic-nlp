@@ -119,7 +119,7 @@ val_loader = DataLoader(
 
 class SentimentModel(pl.LightningModule):
     def __init__(self, num_users, num_products, embedding_dim=300, n_filters=100, filter_sizes=[3,4,5], 
-                 user_emb_dim=50, product_emb_dim=50, output_dim=5, dropout=0.5, learning_rate=1e-3, user_embedding_weights=None, product_embedding_weights=None, als_freeze=True):
+                 user_emb_dim=50, product_emb_dim=50, output_dim=5, dropout=0.5, learning_rate=1e-3, user_embedding_weights=None, product_embedding_weights=None, als_freeze=False):
         super(SentimentModel, self).__init__()
 
         self.save_hyperparameters()
@@ -229,8 +229,8 @@ model = SentimentModel(
     num_users=num_users,
     num_products=num_products,
     embedding_dim=300,  # GloVe embedding size
-    n_filters=100,
-    filter_sizes=[3, 4, 5, 7],  # fuzzy n-gram sizes
+    n_filters=500,
+    filter_sizes=[3, 4, 5, 6, 7],  # fuzzy n-gram sizes
     user_emb_dim=100,
     product_emb_dim=100,
     output_dim=5,  # Ratings from 0 to 4
@@ -256,7 +256,7 @@ checkpoint_callback = ModelCheckpoint(
 )
 
 trainer = Trainer(
-    max_epochs=50,
+    max_epochs=100,
     accelerator='gpu',
     devices='auto',  # Automatically use available GPUs
     strategy='ddp',
