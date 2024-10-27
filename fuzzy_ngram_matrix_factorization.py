@@ -70,8 +70,8 @@ if __name__ == '__main__':
         dropout=0.4,
         user_embedding_weights=torch.tensor(user_embeddings, dtype=torch.float32),
         product_embedding_weights=torch.tensor(item_embeddings, dtype=torch.float32),
-        blend_factor=0.3,  # Adjust to taste :P
-        unfreeze_epoch=0,
+        blend_factor=0.9,  # Adjust to taste :P
+        unfreeze_epoch=10,
         weight_decay=1e-2,
         extern_params={
             'als_factors': user_product_embed_size,

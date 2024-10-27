@@ -58,14 +58,13 @@ class SentimentModel(pl.LightningModule):
                 product_emb_dim = product_embedding_weights.shape[1]
 
             # Random embeddings
-            self.user_embedding = self._blend_embeddings(nn.Embedding(num_users, user_emb_dim), user_embedding_weights)
-            self.product_embedding = self._blend_embeddings(nn.Embedding(num_products, product_emb_dim), product_embedding_weights)
+            self.user_embedding = self._blend_embeddings(nn.Embedding(num_users, user_emb_dim), user_embedding_weights, blend_factor)
+            self.product_embedding = self._blend_embeddings(nn.Embedding(num_products, product_emb_dim), product_embedding_weights, blend_factor)
         else:
             # If no pre-trained embeddings, use only random embeddings
             self.user_embedding = nn.Embedding(num_users, user_emb_dim)
             self.product_embedding = nn.Embedding(num_products, product_emb_dim)
 
-        self.blend_factor = blend_factor  # Store blend factor as a hyperparameter
         self.unfreeze_epoch = unfreeze_epoch  # Store unfreeze epoch as a hyperparameter
 
         self.enable_user_product_dim_reduce = enable_user_product_dim_reduce
@@ -92,33 +91,25 @@ class SentimentModel(pl.LightningModule):
         # Initially freeze embeddings
         self._freeze_embeddings()
 
-    def _blend_embeddings(self, random_embedding_weights, pretrained_embedding_weights):
+    def _blend_embeddings(self, random_embedding_weights, pretrained_embedding_weights, blend_factor):
         """
         Blend pre-trained and random embeddings during initialization.
         """
         blended_user_weights = (
-            self.blend_factor * pretrained_embedding_weights +
-            (1 - self.blend_factor) * random_embedding_weights.weight.data
+            blend_factor * pretrained_embedding_weights +
+            (1 - blend_factor) * random_embedding_weights.weight.data
         )
         return nn.Embedding.from_pretrained(
             blended_user_weights
         )
 
     def _freeze_embeddings(self):
-        # Initially freeze all embedding parameters
-        if self.user_embedding_pretrained is not None:
-            self.user_embedding_pretrained.weight.requires_grad = False
-            self.product_embedding_pretrained.weight.requires_grad = False
-        self.user_embedding_random.weight.requires_grad = False
-        self.product_embedding_random.weight.requires_grad = False
+        self.user_embedding.weight.requires_grad = False
+        self.product_embedding.weight.requires_grad = False
 
     def _unfreeze_embeddings(self):
-        # Unfreeze embedding parameters
-        if self.user_embedding_pretrained is not None:
-            self.user_embedding_pretrained.weight.requires_grad = True
-            self.product_embedding_pretrained.weight.requires_grad = True
-        self.user_embedding_random.weight.requires_grad = True
-        self.product_embedding_random.weight.requires_grad = True
+        self.user_embedding.weight.requires_grad = True
+        self.product_embedding.weight.requires_grad = True
 
     def forward(self, text, summary, user_idx, product_idx, helpfulness_ratio, log_helpfulness_denominator):
         # Text Embedding
@@ -144,23 +135,8 @@ class SentimentModel(pl.LightningModule):
 
         text_cat = self.dropout(text_cat)
 
-        # User and Product Embeddings
-        # Get embeddings from both pre-trained and random embeddings
-        if self.user_embedding_pretrained is not None:
-            user_embedded_pretrained = self.user_embedding_pretrained(user_idx)
-            product_embedded_pretrained = self.product_embedding_pretrained(product_idx)
-            user_embedded_random = self.user_embedding_random(user_idx)
-            product_embedded_random = self.product_embedding_random(product_idx)
-
-            # Blend the embeddings
-            user_embedded = self.blend_factor * user_embedded_pretrained + \
-                            (1 - self.blend_factor) * user_embedded_random
-            product_embedded = self.blend_factor * product_embedded_pretrained + \
-                               (1 - self.blend_factor) * product_embedded_random
-        else:
-            # Use only random embeddings
-            user_embedded = self.user_embedding_random(user_idx)
-            product_embedded = self.product_embedding_random(product_idx)
+        user_embedded = self.user_embedding(user_idx)
+        product_embedded = self.product_embedding(product_idx)
 
         # Ensure helpfulness_ratio and log_helpfulness_denominator are 2D tensors
         helpfulness_ratio = helpfulness_ratio.unsqueeze(1)                      # [batch_size, 1]
