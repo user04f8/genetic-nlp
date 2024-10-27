@@ -258,9 +258,8 @@ checkpoint_callback = ModelCheckpoint(
 trainer = Trainer(
     max_epochs=50,
     accelerator='gpu',
-    devices=[1],
-    # devices='auto',  # Automatically use available GPUs
-    # strategy='ddp',
+    devices='auto',  # Automatically use available GPUs
+    strategy='ddp',
     callbacks=[
         # early_stopping, 
         lr_monitor, 
