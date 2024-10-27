@@ -23,7 +23,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     cull_unknown_threshold = 3
-    user_product_embed_size = 15
+    user_product_embed_size = 12
     als_iterations = 10
     als_regularization = 0.1
 
@@ -63,16 +63,16 @@ if __name__ == '__main__':
         num_products=num_products,
         embedding_dim=300,  # GloVe embedding size
         n_filters=100,
-        filter_sizes=[3, 4, 5, 6, 7, 8],  # fuzzy n-gram sizes
+        filter_sizes=[4, 5, 6, 8],  # fuzzy n-gram sizes
         user_emb_dim=user_product_embed_size,
         product_emb_dim=user_product_embed_size,
         output_dim=5,  # Ratings from 0 to 4
-        dropout=0.7,
+        dropout=0.6,
         user_embedding_weights=torch.tensor(user_embeddings, dtype=torch.float32),
         product_embedding_weights=torch.tensor(item_embeddings, dtype=torch.float32),
         blend_factor=0.1,  # Adjust to taste :P
         unfreeze_epoch=4,
-        weight_decay=2e-2,
+        weight_decay=5e-2,
         extern_params={
             'als_factors': user_product_embed_size,
             'als_iterations': als_iterations,

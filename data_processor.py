@@ -106,12 +106,15 @@ class DataProcessor:
                 df['product_idx'] = self.product_encoder.transform(df['ProductId'])
             else:
                 # Map unknown users/products to '<unknown_user>'/'<unknown_product>'
-                df['UserId'] = df['UserId'].apply(
-                    lambda x: x if x in self.user_encoder.classes_ else '<unknown_user>'
-                )
-                df['ProductId'] = df['ProductId'].apply(
-                    lambda x: x if x in self.product_encoder.classes_ else '<unknown_product>'
-                )
+                # df['UserId'] = df['UserId'].apply(
+                #     lambda x: x if x in self.user_encoder.classes_ else '<unknown_user>'
+                # )
+                # df['ProductId'] = df['ProductId'].apply(
+                #     lambda x: x if x in self.product_encoder.classes_ else '<unknown_product>'
+                # )
+
+                df['UserId'] = df['UserId'].where(df['UserId'].isin(self.user_encoder.classes_), '<unknown_user>')
+                df['ProductId'] = df['ProductId'].where(df['ProductId'].isin(self.product_encoder.classes_), '<unknown_product>')
 
                 df['user_idx'] = self.user_encoder.transform(df['UserId'])
                 df['product_idx'] = self.product_encoder.transform(df['ProductId'])
