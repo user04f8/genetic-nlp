@@ -17,6 +17,7 @@ class SentimentModel(pl.LightningModule):
         output_dim=5,
         dropout=0.5,
         learning_rate=1e-3,
+        weight_decay: float = None,
         user_embedding_weights=None,
         product_embedding_weights=None,
         als_freeze=False,
@@ -25,6 +26,7 @@ class SentimentModel(pl.LightningModule):
         no_load_glove=False,
         blend_factor=0.5,
         unfreeze_epoch=5,  # Unfreeze after 5 epochs
+        extern_params=None
     ):
         super(SentimentModel, self).__init__()
 
@@ -95,6 +97,7 @@ class SentimentModel(pl.LightningModule):
 
         self.dropout = nn.Dropout(dropout)
         self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
 
         # Initially freeze embeddings
         self._freeze_embeddings()
@@ -198,12 +201,23 @@ class SentimentModel(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
-            filter(lambda p: p.requires_grad, self.parameters()), lr=self.learning_rate
-        )
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.2, patience=2
-        )
+        if self.weight_decay is None:
+            optimizer = torch.optim.Adam(
+                filter(lambda p: p.requires_grad, self.parameters()), lr=self.learning_rate
+            )
+        else:
+            no_decay = ['bias', 'LayerNorm.weight', 'embedding']  # Embedding layers shouldn't have weight decay
+            decay = [p for n, p in self.named_parameters() if not any(nd in n for nd in no_decay)]
+            no_decay_params = [p for n, p in self.named_parameters() if any(nd in n for nd in no_decay)]
+
+            optimizer = torch.optim.AdamW(
+                [{'params': decay, 'weight_decay': self.weight_decay},
+                {'params': no_decay_params, 'weight_decay': 0.0}],  # No weight decay for embeddings
+                lr=self.learning_rate
+            )
+
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=2)
+
         return {
             'optimizer': optimizer,
             'lr_scheduler': {

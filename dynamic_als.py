@@ -9,7 +9,7 @@ from sklearn.preprocessing import LabelEncoder
 
 from preprocess_data import load_data
 
-def update_df_and_get_als(reviews_df, data_processor, n_factors=100, n_iterations=10, cache_dir='./cache/'):
+def update_df_and_get_als(reviews_df, data_processor, n_factors=100, n_iterations=10, cache_dir='./cache/', regularization=0.4):
     os.makedirs(cache_dir, exist_ok=True)
 
     # Define cache file paths
@@ -47,7 +47,7 @@ def update_df_and_get_als(reviews_df, data_processor, n_factors=100, n_iteration
 
         user_embeddings, item_embeddings = compute_als(
             user_indices, product_indices, ratings, num_users, num_products,
-            n_factors, n_iterations
+            n_factors, n_iterations=n_iterations, regularization=regularization
         )
 
         # Save outputs to cache

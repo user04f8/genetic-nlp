@@ -22,17 +22,22 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint', type=str, default=None, help="Path to the checkpoint file")
     args = parser.parse_args()
 
+    cull_unknown_threshold = 1
+    user_product_embed_size = 20
+    als_iterations = 10
+    als_regularization = 0.1
+
     # Load the data
     reviews_df, _ = load_data()
 
     # Initialize DataProcessor and set encoders
-    data_processor = DataProcessor(no_unknowns=True, unknown_threshold=0)
-
-    user_product_embed_size = 40
+    data_processor = DataProcessor(no_unknowns=False, unknown_threshold=cull_unknown_threshold)
+    data_processor.fit_encoders(reviews_df)
 
     # Generate ALS embeddings and update DataFrame
     user_embeddings, item_embeddings, num_users, num_products = update_df_and_get_als(
-        reviews_df, data_processor, n_factors=user_product_embed_size, n_iterations=10, cache_dir='./cache/'
+        reviews_df, data_processor, n_factors=user_product_embed_size, n_iterations=als_iterations, regularization=als_regularization, 
+        cache_dir='./cache/'
     )
 
     # Process reviews_df to include 'user_idx' and 'product_idx'
@@ -67,6 +72,13 @@ if __name__ == '__main__':
         product_embedding_weights=torch.tensor(item_embeddings, dtype=torch.float32),
         blend_factor=0.0,  # Adjust to taste :P
         unfreeze_epoch=0,
+        weight_decay=None,
+        extern_params={
+            'als_factors': user_product_embed_size,
+            'als_iterations': als_iterations,
+            'als_regularization': als_regularization,
+            'cull_unknown_threshold': cull_unknown_threshold
+        }
     )
 
     # Callbacks
@@ -80,7 +92,7 @@ if __name__ == '__main__':
         save_last=True,
     )
 
-    logger = TensorBoardLogger("lightning_logs", name="legacy_test_old_params")
+    logger = TensorBoardLogger("lightning_logs", name="simple_cull_rare")
 
     # Trainer
     trainer = Trainer(
