@@ -19,12 +19,12 @@ from utils import seed_everything
 
 FINAL_CHECKPOINT_FILENAME = "checkpoints/fuzzy_ngram_model.ckpt"
 
-seed_everything(1)
+# Reproducability stuff
+seed_everything(2)
 torch.set_float32_matmul_precision('high')
 
 # Load the data
 reviews_df, test_df = load_data()
-
 
 # Encode User IDs and Product IDs
 user_encoder = LabelEncoder()
@@ -127,8 +127,10 @@ val_loader = DataLoader(
 
 class SentimentModel(pl.LightningModule):
     def __init__(self, num_users, num_products, embedding_dim=300, n_filters=100, filter_sizes=[3,4,5], 
-                 user_emb_dim=50, product_emb_dim=50, output_dim=5, dropout=0.5):
+                 user_emb_dim=50, product_emb_dim=50, output_dim=5, dropout=0.5, learning_rate=1e-3):
         super(SentimentModel, self).__init__()
+
+        self.save_hyperparameters()
 
         # Load pre-trained GloVe embeddings
         self.embedding = get_glove()
@@ -148,6 +150,7 @@ class SentimentModel(pl.LightningModule):
         self.fc = nn.Linear(len(filter_sizes)*n_filters*2 + user_emb_dim + product_emb_dim, output_dim)
 
         self.dropout = nn.Dropout(dropout)
+        self.learning_rate = learning_rate
 
     def forward(self, text, summary, user_idx, product_idx):
         # Text Embedding
@@ -221,11 +224,11 @@ model = SentimentModel(
     num_products=num_products,
     embedding_dim=300,  # GloVe embedding size
     n_filters=100,
-    filter_sizes=[3, 4, 5],
-    user_emb_dim=50,
-    product_emb_dim=50,
+    filter_sizes=[3, 4, 5],  # fuzzy n-gram sizes
+    user_emb_dim=20,
+    product_emb_dim=20,
     output_dim=5,  # Ratings from 0 to 4
-    dropout=0.5
+    dropout=0.3
 )
 
 early_stopping = EarlyStopping(monitor='val_loss', patience=3, mode='min')
