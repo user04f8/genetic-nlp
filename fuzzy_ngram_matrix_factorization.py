@@ -1,6 +1,5 @@
-import os
+import argparse
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,7 +11,6 @@ from pytorch_lightning import Trainer
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import random_split
-from sklearn.preprocessing import LabelEncoder
 
 from preprocess_data import load_data, get_glove
 from utils import seed_everything
@@ -117,16 +115,20 @@ def collate_fn(batch):
 class SentimentModel(pl.LightningModule):
     def __init__(self, num_users, num_products, embedding_dim=300, n_filters=100, filter_sizes=[3,4,5], 
                  user_emb_dim=50, product_emb_dim=50, output_dim=5, dropout=0.5, learning_rate=1e-3, user_embedding_weights=None, product_embedding_weights=None, als_freeze=False, latent_user_product_dim=25,
-                 enable_user_product_dim_reduce=False):
+                 enable_user_product_dim_reduce=False, no_load_glove=False):
         super(SentimentModel, self).__init__()
 
         self.save_hyperparameters()
 
-        # Load pre-trained GloVe embeddings
-        self.embedding = get_glove()
-        self.embedding.weight.requires_grad = False  # Freeze embeddings
+        if no_load_glove:
+            self.embedding = nn.Identity()
+            print('WARN: not loading GloVe (this should only be done during model analysis)')
+        else:
+            # Load pre-trained GloVe embeddings
+            self.embedding = get_glove()
+            self.embedding.weight.requires_grad = False  # Freeze embeddings
 
-        # Text CNN
+        # Fuzzy n-grams
         self.convs = nn.ModuleList([
             nn.Conv2d(in_channels=1, out_channels=n_filters, kernel_size=(fs, embedding_dim))
             for fs in filter_sizes
@@ -230,6 +232,14 @@ class SentimentModel(pl.LightningModule):
         if 'state_dict' in checkpoint and 'embedding.weight' in checkpoint['state_dict']:
             del checkpoint['state_dict']['embedding.weight']
 
+    def load_state_dict(self, state_dict, strict=True):
+        missing_keys, unexpected_keys = super().load_state_dict(state_dict, strict=False)
+        # Remove 'embedding.weight' from missing_keys
+        if 'embedding.weight' in missing_keys:
+            missing_keys.remove('embedding.weight')
+        if strict and (len(missing_keys) > 0 or len(unexpected_keys) > 0):
+            raise RuntimeError(f"Missing or unexpected keys: {missing_keys} {unexpected_keys}")
+
     # def on_load_checkpoint(self, checkpoint):
         # """Handle the missing GloVe embeddings when loading the checkpoint."""
         # No action needed since we load the GloVe embeddings in __init__
@@ -249,6 +259,10 @@ def evaluate_model(model, dataloader):
     print(f'Final validation Accuracy: {accuracy:.4f}')
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Train a model with an optional checkpoint path")
+    parser.add_argument('--checkpoint', type=str, default=None, help="Path to the checkpoint file")
+    args = parser.parse_args()
+    
     # Load the data
     reviews_df, test_df = load_data()
 
@@ -295,7 +309,7 @@ if __name__ == '__main__':
     checkpoint_callback = ModelCheckpoint(
         # dirpath='checkpoints/fuzzy_ngram',        # Directory to save checkpoints
         # filename='best_model_version_30',        # Filename for the checkpoint
-        save_weights_only=True,
+        save_weights_only=False,
         monitor='val_acc',            # Monitored metric
         mode='max',                   # Mode for the monitored metric ('min' or 'max')
         save_top_k=1,
@@ -313,8 +327,7 @@ if __name__ == '__main__':
             checkpoint_callback],
     )
     
-    trainer.fit(model, train_loader, val_loader)
-    # trainer.fit(model, train_loader, val_loader, ckpt_path="lightning_logs/version_49/checkpoints/last.ckpt")
+    trainer.fit(model, train_loader, val_loader, ckpt_path=args.checkpoint)
 
     trainer.save_checkpoint(FINAL_CHECKPOINT_FILENAME)
 

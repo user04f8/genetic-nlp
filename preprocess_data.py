@@ -23,6 +23,11 @@ def load_glove():
         glove_vocab = {word: idx for idx, word in enumerate(glove_model.index_to_key)}
         print('Done!')
 
+def get_glove_vocab():
+    global glove_vocab
+    load_glove()
+    return glove_vocab
+
 def get_glove(freeze=True):
     global glove_embedding_matrix
     import torch

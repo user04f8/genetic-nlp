@@ -8,7 +8,7 @@ from sklearn.preprocessing import LabelEncoder
 
 from preprocess_data import load_data
 
-def update_df_and_get_als(reviews_df, n_factors=100, cache_dir='./cache/'):
+def update_df_and_get_als(reviews_df, n_factors=100, n_iterations=10, cache_dir='./cache/'):
     os.makedirs(cache_dir, exist_ok=True)
 
     # Define cache file paths
@@ -40,7 +40,7 @@ def update_df_and_get_als(reviews_df, n_factors=100, cache_dir='./cache/'):
         reviews_df['product_idx'] = product_encoder.transform(reviews_df['ProductId'])
     else:
         print('Computing ALS outputs...')
-        user_embeddings, item_embeddings, num_users, num_products, user_encoder, product_encoder = compute_als(reviews_df, n_factors)
+        user_embeddings, item_embeddings, num_users, num_products, user_encoder, product_encoder = compute_als(reviews_df, n_factors, n_iterations)
 
         # Save outputs to cache
         np.save(user_emb_path, user_embeddings)
@@ -56,7 +56,7 @@ def update_df_and_get_als(reviews_df, n_factors=100, cache_dir='./cache/'):
 
     return user_embeddings, item_embeddings, num_users, num_products, user_encoder, product_encoder
 
-def compute_als(reviews_df, n_factors):
+def compute_als(reviews_df, n_factors, n_iterations=10, regularization=0.4):
     # Map UserId and ProductId to integer indices
     user_encoder = LabelEncoder()
     product_encoder = LabelEncoder()
@@ -88,8 +88,8 @@ def compute_als(reviews_df, n_factors):
     # Initialize the ALS model
     als_model = implicit.als.AlternatingLeastSquares(
         factors=n_factors,
-        regularization=0.5,
-        iterations=5,
+        regularization=regularization,
+        iterations=n_iterations,
         use_gpu=False  # Disable GPU to avoid CuPy
     )
 
@@ -104,4 +104,3 @@ def compute_als(reviews_df, n_factors):
     # NOTE: this was a fun 2-hour debugging adventure. Something with implicit's handling of the csr matrix above is a bit interesting...
 
     return user_embeddings, item_embeddings, num_users, num_products, user_encoder, product_encoder
-
