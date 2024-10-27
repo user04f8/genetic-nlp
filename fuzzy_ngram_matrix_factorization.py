@@ -119,7 +119,7 @@ val_loader = DataLoader(
 
 class SentimentModel(pl.LightningModule):
     def __init__(self, num_users, num_products, embedding_dim=300, n_filters=100, filter_sizes=[3,4,5], 
-                 user_emb_dim=50, product_emb_dim=50, output_dim=5, dropout=0.5, learning_rate=1e-3, user_embedding_weights=None, product_embedding_weights=None, als_freeze=False):
+                 user_emb_dim=50, product_emb_dim=50, output_dim=5, dropout=0.5, learning_rate=1e-3, user_embedding_weights=None, product_embedding_weights=None, als_freeze=True, latent_user_product_dim=10):
         super(SentimentModel, self).__init__()
 
         self.save_hyperparameters()
@@ -144,9 +144,11 @@ class SentimentModel(pl.LightningModule):
         else:
             self.user_embedding = nn.Embedding(num_users, user_emb_dim)
             self.product_embedding = nn.Embedding(num_products, product_emb_dim)
+        
+        self.user_product_dim_reduction = nn.Linear(user_emb_dim + product_emb_dim, latent_user_product_dim)
 
         # Feature weighting
-        self.feature_weights = nn.Linear(len(filter_sizes)*n_filters*2 + user_emb_dim + product_emb_dim, output_dim)
+        self.feature_weights = nn.Linear(len(filter_sizes)*n_filters*2 + latent_user_product_dim, output_dim)
 
         self.dropout = nn.Dropout(dropout)
         self.learning_rate = learning_rate
@@ -160,13 +162,13 @@ class SentimentModel(pl.LightningModule):
         embedded_summary = self.embedding(summary)  # [batch_size, summary_len, emb_dim]
         embedded_summary = embedded_summary.unsqueeze(1)  # [batch_size, 1, summary_len, emb_dim]
 
-        # Convolutions on Text
-        text_conved = [F.relu(conv(embedded_text)).squeeze(3) for conv in self.convs]
-        text_pooled = [F.max_pool1d(t, t.size(2)).squeeze(2) for t in text_conved]
+        # Fuzzy n-grams on Text
+        text_n_grams = [F.relu(conv(embedded_text)).squeeze(3) for conv in self.convs]
+        text_pooled = [F.max_pool1d(t, t.size(2)).squeeze(2) for t in text_n_grams]
 
-        # Convolutions on Summary
-        summary_conved = [F.relu(conv(embedded_summary)).squeeze(3) for conv in self.convs]
-        summary_pooled = [F.max_pool1d(s, s.size(2)).squeeze(2) for s in summary_conved]
+        # Fuzzy n-grams on Summary
+        summary_n_grams = [F.relu(conv(embedded_summary)).squeeze(3) for conv in self.convs]
+        summary_pooled = [F.max_pool1d(s, s.size(2)).squeeze(2) for s in summary_n_grams]
 
         # Concatenate pooled features
         text_features = torch.cat(text_pooled, dim=1)
@@ -180,7 +182,7 @@ class SentimentModel(pl.LightningModule):
         product_embedded = self.product_embedding(product_idx)  # [batch_size, product_emb_dim]
         
         # Concatenate all features
-        combined = torch.cat([text_cat, user_embedded, product_embedded], dim=1)
+        combined = torch.cat([text_cat, F.relu(self.user_product_dim_reduction(torch.cat([user_embedded, product_embedded], dim=1)))], dim=1)
 
         combined = self.dropout(combined)
 
@@ -229,8 +231,8 @@ model = SentimentModel(
     num_users=num_users,
     num_products=num_products,
     embedding_dim=300,  # GloVe embedding size
-    n_filters=500,
-    filter_sizes=[3, 4, 5, 6, 7],  # fuzzy n-gram sizes
+    n_filters=100,
+    filter_sizes=[3, 4, 5],  # fuzzy n-gram sizes
     user_emb_dim=100,
     product_emb_dim=100,
     output_dim=5,  # Ratings from 0 to 4
