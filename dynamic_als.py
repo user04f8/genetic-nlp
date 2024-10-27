@@ -63,8 +63,8 @@ def update_df_and_get_als(reviews_df, data_processor, n_factors=100, n_iteration
     return user_embeddings, item_embeddings, num_users, num_products
 
 def compute_als(user_indices, product_indices, ratings, num_users, num_products, n_factors, n_iterations=10, regularization=0.4):
-    print(f"Number of users: {num_users}")
-    print(f"Number of products: {num_products}")
+    print(f"ALS Number of users: {num_users}")
+    print(f"ALS Number of products: {num_products}")
 
     # Build the sparse interaction matrix in COO format
     interaction_matrix = coo_matrix(

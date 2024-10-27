@@ -25,6 +25,9 @@ class DataProcessor:
         self.low_freq_users = set(user_counts[user_counts <= self.unknown_threshold].index)
         self.low_freq_products = set(product_counts[product_counts <= self.unknown_threshold].index)
 
+        print("Num users culled:", len(self.low_freq_users))
+        print("Num products culled:", len(self.low_freq_products))
+
         # Map low-frequency users/products to 'unknown'
         reviews_df['UserId'] = reviews_df['UserId'].apply(
             lambda x: '<unknown_user>' if x in self.low_freq_users else x

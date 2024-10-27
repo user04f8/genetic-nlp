@@ -22,8 +22,8 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint', type=str, default=None, help="Path to the checkpoint file")
     args = parser.parse_args()
 
-    cull_unknown_threshold = 1
-    user_product_embed_size = 20
+    cull_unknown_threshold = 2
+    user_product_embed_size = 10
     als_iterations = 10
     als_regularization = 0.1
 
@@ -70,9 +70,9 @@ if __name__ == '__main__':
         dropout=0.4,
         user_embedding_weights=torch.tensor(user_embeddings, dtype=torch.float32),
         product_embedding_weights=torch.tensor(item_embeddings, dtype=torch.float32),
-        blend_factor=0.0,  # Adjust to taste :P
+        blend_factor=0.3,  # Adjust to taste :P
         unfreeze_epoch=0,
-        weight_decay=None,
+        weight_decay=1e-2,
         extern_params={
             'als_factors': user_product_embed_size,
             'als_iterations': als_iterations,
@@ -92,7 +92,7 @@ if __name__ == '__main__':
         save_last=True,
     )
 
-    logger = TensorBoardLogger("lightning_logs", name="simple_cull_rare")
+    logger = TensorBoardLogger("lightning_logs", name="heavy_regularization")
 
     # Trainer
     trainer = Trainer(

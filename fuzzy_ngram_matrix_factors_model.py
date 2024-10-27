@@ -57,23 +57,13 @@ class SentimentModel(pl.LightningModule):
                 user_emb_dim = user_embedding_weights.shape[1]
                 product_emb_dim = product_embedding_weights.shape[1]
 
-            # Pre-trained embeddings
-            self.user_embedding_pretrained = nn.Embedding.from_pretrained(
-                embeddings=user_embedding_weights, freeze=als_freeze
-            )
-            self.product_embedding_pretrained = nn.Embedding.from_pretrained(
-                embeddings=product_embedding_weights, freeze=als_freeze
-            )
-
             # Random embeddings
-            self.user_embedding_random = nn.Embedding(num_users, user_emb_dim)
-            self.product_embedding_random = nn.Embedding(num_products, product_emb_dim)
+            self.user_embedding = self._blend_embeddings(nn.Embedding(num_users, user_emb_dim), user_embedding_weights)
+            self.product_embedding = self._blend_embeddings(nn.Embedding(num_products, product_emb_dim), product_embedding_weights)
         else:
             # If no pre-trained embeddings, use only random embeddings
-            self.user_embedding_random = nn.Embedding(num_users, user_emb_dim)
-            self.product_embedding_random = nn.Embedding(num_products, product_emb_dim)
-            self.user_embedding_pretrained = None
-            self.product_embedding_pretrained = None
+            self.user_embedding = nn.Embedding(num_users, user_emb_dim)
+            self.product_embedding = nn.Embedding(num_products, product_emb_dim)
 
         self.blend_factor = blend_factor  # Store blend factor as a hyperparameter
         self.unfreeze_epoch = unfreeze_epoch  # Store unfreeze epoch as a hyperparameter
@@ -101,6 +91,18 @@ class SentimentModel(pl.LightningModule):
 
         # Initially freeze embeddings
         self._freeze_embeddings()
+
+    def _blend_embeddings(self, random_embedding_weights, pretrained_embedding_weights):
+        """
+        Blend pre-trained and random embeddings during initialization.
+        """
+        blended_user_weights = (
+            self.blend_factor * pretrained_embedding_weights +
+            (1 - self.blend_factor) * random_embedding_weights.weight.data
+        )
+        return nn.Embedding.from_pretrained(
+            blended_user_weights
+        )
 
     def _freeze_embeddings(self):
         # Initially freeze all embedding parameters
