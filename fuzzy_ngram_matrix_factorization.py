@@ -16,6 +16,7 @@ from sklearn.preprocessing import LabelEncoder
 
 from preprocess_data import load_data, get_glove
 from utils import seed_everything
+from dynamic_als import update_df_and_get_als
 
 FINAL_CHECKPOINT_FILENAME = "checkpoints/fuzzy_ngram_model.ckpt"
 
@@ -26,16 +27,7 @@ torch.set_float32_matmul_precision('high')
 # Load the data
 reviews_df, test_df = load_data()
 
-# Encode User IDs and Product IDs
-user_encoder = LabelEncoder()
-product_encoder = LabelEncoder()
-
-reviews_df['user_idx'] = user_encoder.fit_transform(reviews_df['UserId'])
-reviews_df['product_idx'] = product_encoder.fit_transform(reviews_df['ProductId'])
-
-# Get the number of unique users and products
-num_users = len(user_encoder.classes_)
-num_products = len(product_encoder.classes_)
+user_embeddings, item_embeddings, num_users, num_products = update_df_and_get_als(reviews_df, n_factors=100)
 
 class ReviewDataset(Dataset):
     def __init__(self, df):
@@ -127,7 +119,7 @@ val_loader = DataLoader(
 
 class SentimentModel(pl.LightningModule):
     def __init__(self, num_users, num_products, embedding_dim=300, n_filters=100, filter_sizes=[3,4,5], 
-                 user_emb_dim=50, product_emb_dim=50, output_dim=5, dropout=0.5, learning_rate=1e-3):
+                 user_emb_dim=50, product_emb_dim=50, output_dim=5, dropout=0.5, learning_rate=1e-3, user_embedding_weights=None, product_embedding_weights=None, als_freeze=True):
         super(SentimentModel, self).__init__()
 
         self.save_hyperparameters()
@@ -142,11 +134,16 @@ class SentimentModel(pl.LightningModule):
             for fs in filter_sizes
         ])
 
-        # User and Product Embeddings
-        # self.user_embedding = nn.Embedding(num_users, user_emb_dim)
-        # self.product_embedding = nn.Embedding(num_products, product_emb_dim)
-        self.user_embedding = nn.Embedding.from_pretrained(torch.tensor(np.load(f'als_embeddings/user_embeddings_{user_emb_dim}')), freeze=True)
-        self.product_embedding = nn.Embedding.from_pretrained(torch.tensor(np.load(f'als_embeddings/product_embeddings_{user_emb_dim}')), freeze=True)
+        if user_embedding_weights is not None:
+            if (user_embedding_weights.shape[1] != user_emb_dim) or (product_embedding_weights.shape[1] != product_emb_dim):
+                print("WARNING, emb_dim appears mismatched: ", user_emb_dim, product_emb_dim)
+                user_emb_dim = user_embedding_weights.shape[1]
+                product_emb_dim = product_embedding_weights.shape[1]
+            self.user_embedding = nn.Embedding.from_pretrained(embeddings=user_embedding_weights, freeze=als_freeze)
+            self.product_embedding = nn.Embedding.from_pretrained(embeddings=product_embedding_weights, freeze=als_freeze)
+        else:
+            self.user_embedding = nn.Embedding(num_users, user_emb_dim)
+            self.product_embedding = nn.Embedding(num_products, product_emb_dim)
 
         # Feature weighting
         self.feature_weights = nn.Linear(len(filter_sizes)*n_filters*2 + user_emb_dim + product_emb_dim, output_dim)
@@ -179,12 +176,11 @@ class SentimentModel(pl.LightningModule):
         text_cat = self.dropout(text_cat)
 
         # User and Product Embeddings
-        user_embedded = self.user_embedding(user_idx)
-        product_embedded = self.product_embedding(product_idx)
-
+        user_embedded = self.user_embedding(user_idx)  # [batch_size, user_emb_dim]
+        product_embedded = self.product_embedding(product_idx)  # [batch_size, product_emb_dim]
+        
         # Concatenate all features
-        # combined = torch.cat([text_cat, user_embedded, product_embedded], dim=1)
-        combined = torch.cat([user_embedded, product_embedded], dim=1)
+        combined = torch.cat([text_cat, user_embedded, product_embedded], dim=1)
 
         combined = self.dropout(combined)
 
@@ -235,10 +231,14 @@ model = SentimentModel(
     embedding_dim=300,  # GloVe embedding size
     n_filters=100,
     filter_sizes=[3, 4, 5, 7],  # fuzzy n-gram sizes
-    user_emb_dim=40,
-    product_emb_dim=40,
+    user_emb_dim=100,
+    product_emb_dim=100,
     output_dim=5,  # Ratings from 0 to 4
-    dropout=0.4
+    dropout=0.4,
+    user_embedding_weights=torch.tensor(user_embeddings,
+                                        dtype=torch.float32),
+    product_embedding_weights=torch.tensor(item_embeddings,
+                                           dtype=torch.float32)
 )
 
 early_stopping = EarlyStopping(monitor='val_acc', patience=5, mode='max')
@@ -258,8 +258,9 @@ checkpoint_callback = ModelCheckpoint(
 trainer = Trainer(
     max_epochs=50,
     accelerator='gpu',
-    devices='auto',  # Automatically use available GPUs
-    strategy='ddp',
+    devices=[1],
+    # devices='auto',  # Automatically use available GPUs
+    # strategy='ddp',
     callbacks=[
         # early_stopping, 
         lr_monitor, 
