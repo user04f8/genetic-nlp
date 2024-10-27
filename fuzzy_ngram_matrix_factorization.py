@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning import Trainer
 
 from torch.utils.data import Dataset, DataLoader
@@ -20,7 +20,7 @@ from utils import seed_everything
 FINAL_CHECKPOINT_FILENAME = "checkpoints/fuzzy_ngram_model.ckpt"
 
 # Reproducability stuff
-seed_everything(2)
+seed_everything(3)
 torch.set_float32_matmul_precision('high')
 
 # Load the data
@@ -202,8 +202,8 @@ class SentimentModel(pl.LightningModule):
         outputs = self.forward(batch['text'], batch['summary'], batch['user'], batch['product'])
         loss = F.cross_entropy(outputs, batch['label'])
         acc = (outputs.argmax(1) == batch['label']).float().mean()
-        self.log('val_loss', loss, prog_bar=True)
-        self.log('val_acc', acc, prog_bar=True)
+        self.log('val_loss', loss, prog_bar=True, sync_dist=True)
+        self.log('val_acc', acc, prog_bar=True, sync_dist=True)
         return loss
 
     def configure_optimizers(self):
@@ -218,29 +218,51 @@ class SentimentModel(pl.LightningModule):
             }
         }
 
+    def on_save_checkpoint(self, checkpoint):
+        """Exclude the GloVe embeddings from the checkpoint."""
+        if 'state_dict' in checkpoint and 'embedding.weight' in checkpoint['state_dict']:
+            del checkpoint['state_dict']['embedding.weight']
+
+    # def on_load_checkpoint(self, checkpoint):
+        # """Handle the missing GloVe embeddings when loading the checkpoint."""
+        # No action needed since we load the GloVe embeddings in __init__
+        # pass
+
 # Initialize the model
 model = SentimentModel(
     num_users=num_users,
     num_products=num_products,
     embedding_dim=300,  # GloVe embedding size
     n_filters=100,
-    filter_sizes=[3, 4, 5],  # fuzzy n-gram sizes
-    user_emb_dim=20,
-    product_emb_dim=20,
+    filter_sizes=[3, 4, 5, 7],  # fuzzy n-gram sizes
+    user_emb_dim=40,
+    product_emb_dim=40,
     output_dim=5,  # Ratings from 0 to 4
-    dropout=0.3
+    dropout=0.4
 )
 
-early_stopping = EarlyStopping(monitor='val_loss', patience=3, mode='min')
+early_stopping = EarlyStopping(monitor='val_acc', patience=5, mode='max')
 
 lr_monitor = LearningRateMonitor(logging_interval='epoch')
+
+checkpoint_callback = ModelCheckpoint(
+    monitor='val_acc',            # Monitored metric
+    dirpath='checkpoints/fuzzy_ngram',        # Directory to save checkpoints
+    filename='best_model_version_30',        # Filename for the checkpoint
+    save_top_k=2,                 # Save only the best model
+    mode='max',                   # Mode for the monitored metric ('min' or 'max')
+    save_weights_only=True        # Save only the model's weights (state_dict)
+)
 
 trainer = Trainer(
     max_epochs=50,
     accelerator='gpu',
     devices='auto',  # Automatically use available GPUs
     strategy='ddp',
-    callbacks=[early_stopping, lr_monitor]  # Add callbacks
+    callbacks=[
+        # early_stopping, 
+        lr_monitor, 
+        checkpoint_callback],
 )
 
 
@@ -258,8 +280,9 @@ def evaluate_model(model, dataloader):
     print(f'Final validation Accuracy: {accuracy:.4f}')
 
 if __name__ == '__main__':
-
+    
     trainer.fit(model, train_loader, val_loader)
+    # trainer.fit(model, train_loader, val_loader, ckpt_path="lightning_logs/version_26/checkpoints/epoch=18-step=5529.ckpt")
 
     trainer.save_checkpoint(FINAL_CHECKPOINT_FILENAME)
 
