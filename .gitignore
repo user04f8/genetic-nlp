@@ -3,6 +3,7 @@ __pycache__/
 .ipynb_checkpoints/
 **/.ipynb_checkpoints/
 
+cache/
 checkpoints/
 dev/environment_specific_notes.md
 dev/host_notebook.sh

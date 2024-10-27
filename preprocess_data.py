@@ -107,6 +107,21 @@ def preprocess():
     test_df['Summary_glove_tokens_np'] = test_df['Summary_glove_tokens'].apply(lambda x: np.array(x, dtype=np.int32))
     test_df['Text_glove_tokens_np'] = test_df['Text_glove_tokens'].apply(lambda x: np.array(x, dtype=np.int32))
 
+    print('Determining helpfulness ratios...')
+    train_df['HelpfulnessRatio'] = np.minimum(np.where(
+        train_df['HelpfulnessDenominator'] > 0,
+        train_df['HelpfulnessNumerator'] / train_df['HelpfulnessDenominator'],
+        0
+    ), 1)
+    test_df['HelpfulnessRatio'] = np.minimum(np.where(
+        test_df['HelpfulnessDenominator'] > 0,
+        test_df['HelpfulnessNumerator'] / test_df['HelpfulnessDenominator'],
+        0
+    ), 1)
+
+    train_df['LogHelpfulnessDenominator'] = np.log(train_df['HelpfulnessDenominator'] + 1)
+    test_df['LogHelpfulnessDenominator'] = np.log(test_df['HelpfulnessDenominator'] + 1)
+
     print('Saving dataset as Parquet...')
     train_df.to_parquet(train_parquet_path, compression='snappy')
     test_df.to_parquet(test_parquet_path, compression='snappy')

@@ -24,18 +24,17 @@ FINAL_CHECKPOINT_FILENAME = "checkpoints/fuzzy_ngram_model.ckpt"
 seed_everything(3)
 torch.set_float32_matmul_precision('high')
 
-# Load the data
-reviews_df, test_df = load_data()
-
-user_embeddings, item_embeddings, num_users, num_products = update_df_and_get_als(reviews_df, n_factors=100)
-
 class ReviewDataset(Dataset):
     def __init__(self, df):
         self.text_tokens = df['Text_glove_tokens_np'].values
         self.summary_tokens = df['Summary_glove_tokens_np'].values
         self.user_idx = df['user_idx'].values
         self.product_idx = df['product_idx'].values
+
         self.labels = df['Score'].values.astype(np.int64) - 1  # Ratings from 0 to 4
+
+        self.helpfulness_ratio = df['HelpfulnessRatio'].values
+        self.log_helpfulness_denominator = df['LogHelpfulnessDenominator'].values
 
     def __len__(self):
         return len(self.labels)
@@ -46,12 +45,16 @@ class ReviewDataset(Dataset):
         user = self.user_idx[idx]
         product = self.product_idx[idx]
         label = self.labels[idx]
+        helpfulness_ratio = self.helpfulness_ratio[idx]
+        log_helpfulness_denominator = self.log_helpfulness_denominator[idx]
         return {
             'text': torch.tensor(text, dtype=torch.long),
             'summary': torch.tensor(summary, dtype=torch.long),
             'user': torch.tensor(user, dtype=torch.long),
             'product': torch.tensor(product, dtype=torch.long),
-            'label': torch.tensor(label, dtype=torch.long)
+            'label': torch.tensor(label, dtype=torch.long),
+            'helpfulness_ratio': torch.tensor(helpfulness_ratio, dtype=torch.float),
+            'log_helpfulness_denominator': torch.tensor(log_helpfulness_denominator, dtype=torch.float)
         }
 
 class TestReviewDataset(Dataset):
@@ -60,7 +63,11 @@ class TestReviewDataset(Dataset):
         self.summary_tokens = df['Summary_glove_tokens_np'].values
         self.user_idx = df['user_idx'].values
         self.product_idx = df['product_idx'].values
+
         self.ids = df['Id'].values  # Add `Id` to return for submission
+
+        self.helpfulness_ratio = df['HelpfulnessRatio'].values
+        self.log_helpfulness_denominator = df['LogHelpfulnessDenominator'].values
 
     def __len__(self):
         return len(self.ids)
@@ -71,12 +78,16 @@ class TestReviewDataset(Dataset):
         user = self.user_idx[idx]
         product = self.product_idx[idx]
         review_id = self.ids[idx]
+        helpfulness_ratio = self.helpfulness_ratio[idx]
+        log_helpfulness_denominator = self.log_helpfulness_denominator[idx]
         return {
             'text': torch.tensor(text, dtype=torch.long),
             'summary': torch.tensor(summary, dtype=torch.long),
             'user': torch.tensor(user, dtype=torch.long),
             'product': torch.tensor(product, dtype=torch.long),
-            'Id': review_id  # Return the Id for the final submission
+            'Id': review_id,  # Return the Id for the final submission
+            'helpfulness_ratio': torch.tensor(helpfulness_ratio, dtype=torch.float),
+            'log_helpfulness_denominator': torch.tensor(log_helpfulness_denominator, dtype=torch.float)
         }
 
 def collate_fn(batch):
@@ -85,6 +96,9 @@ def collate_fn(batch):
     users = torch.stack([item['user'] for item in batch])
     products = torch.stack([item['product'] for item in batch])
     labels = torch.stack([item['label'] for item in batch])
+    helpfulness_ratios = torch.tensor([item['helpfulness_ratio'] for item in batch], dtype=torch.float)
+    log_helpfulness_denominators = torch.tensor([item['log_helpfulness_denominator'] for item in batch], dtype=torch.float)
+
 
     # Pad sequences
     texts_padded = pad_sequence(texts, batch_first=True, padding_value=0)
@@ -95,27 +109,10 @@ def collate_fn(batch):
         'summary': summaries_padded,
         'user': users,
         'product': products,
-        'label': labels
+        'label': labels,
+        'helpfulness_ratios': helpfulness_ratios,
+        'log_helpfulness_denominators': log_helpfulness_denominators
     }
-
-
-# Split the dataset into training and validation sets
-dataset = ReviewDataset(reviews_df)
-
-train_size = int(0.8 * len(dataset))
-val_size = len(dataset) - train_size
-
-train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-
-batch_size = 512  # Adjust based on GPU memory
-
-train_loader = DataLoader(
-    train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, num_workers=8, pin_memory=True
-)
-val_loader = DataLoader(
-    val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=8, pin_memory=True
-)
-
 
 class SentimentModel(pl.LightningModule):
     def __init__(self, num_users, num_products, embedding_dim=300, n_filters=100, filter_sizes=[3,4,5], 
@@ -148,12 +145,12 @@ class SentimentModel(pl.LightningModule):
         self.user_product_dim_reduction = nn.Linear(user_emb_dim + product_emb_dim, latent_user_product_dim)
 
         # Feature weighting
-        self.feature_weights = nn.Linear(len(filter_sizes)*n_filters*2 + latent_user_product_dim, output_dim)
+        self.feature_weights = nn.Linear(len(filter_sizes)*n_filters*2 + latent_user_product_dim + 2, output_dim)
 
         self.dropout = nn.Dropout(dropout)
         self.learning_rate = learning_rate
 
-    def forward(self, text, summary, user_idx, product_idx):
+    def forward(self, text, summary, user_idx, product_idx, helpfulness_ratio, log_helpfulness_denominator):
         # Text Embedding
         embedded_text = self.embedding(text)  # [batch_size, text_len, emb_dim]
         embedded_text = embedded_text.unsqueeze(1)  # [batch_size, 1, text_len, emb_dim]
@@ -182,7 +179,7 @@ class SentimentModel(pl.LightningModule):
         product_embedded = self.product_embedding(product_idx)  # [batch_size, product_emb_dim]
         
         # Concatenate all features
-        combined = torch.cat([text_cat, F.relu(self.user_product_dim_reduction(torch.cat([user_embedded, product_embedded], dim=1)))], dim=1)
+        combined = torch.cat([text_cat, F.relu(self.user_product_dim_reduction(torch.cat([user_embedded, product_embedded], dim=1))), helpfulness_ratio, log_helpfulness_denominator], dim=1)
 
         combined = self.dropout(combined)
 
@@ -226,49 +223,6 @@ class SentimentModel(pl.LightningModule):
         # No action needed since we load the GloVe embeddings in __init__
         # pass
 
-# Initialize the model
-model = SentimentModel(
-    num_users=num_users,
-    num_products=num_products,
-    embedding_dim=300,  # GloVe embedding size
-    n_filters=100,
-    filter_sizes=[3, 4, 5],  # fuzzy n-gram sizes
-    user_emb_dim=100,
-    product_emb_dim=100,
-    output_dim=5,  # Ratings from 0 to 4
-    dropout=0.4,
-    user_embedding_weights=torch.tensor(user_embeddings,
-                                        dtype=torch.float32),
-    product_embedding_weights=torch.tensor(item_embeddings,
-                                           dtype=torch.float32)
-)
-
-early_stopping = EarlyStopping(monitor='val_acc', patience=5, mode='max')
-
-lr_monitor = LearningRateMonitor(logging_interval='epoch')
-
-checkpoint_callback = ModelCheckpoint(
-    # dirpath='checkpoints/fuzzy_ngram',        # Directory to save checkpoints
-    # filename='best_model_version_30',        # Filename for the checkpoint
-    save_weights_only=True,
-    monitor='val_acc',            # Monitored metric
-    mode='max',                   # Mode for the monitored metric ('min' or 'max')
-    save_top_k=1,
-    save_last=True,
-)
-
-trainer = Trainer(
-    max_epochs=100,
-    accelerator='gpu',
-    devices='auto',  # Automatically use available GPUs
-    strategy='ddp',
-    callbacks=[
-        # early_stopping, 
-        lr_monitor, 
-        checkpoint_callback],
-)
-
-
 def evaluate_model(model, dataloader):
     model.eval()
     total_correct = 0
@@ -283,9 +237,72 @@ def evaluate_model(model, dataloader):
     print(f'Final validation Accuracy: {accuracy:.4f}')
 
 if __name__ == '__main__':
+    # Load the data
+    reviews_df, test_df = load_data()
+
+    user_embeddings, item_embeddings, num_users, num_products, _, _ = update_df_and_get_als(reviews_df, n_factors=100)
+
+    # Split the dataset into training and validation sets
+    dataset = ReviewDataset(reviews_df)
+
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+    batch_size = 512  # Adjust based on GPU memory
+
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn, num_workers=8, pin_memory=True
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=8, pin_memory=True
+    )
+
+    # Initialize the model
+    model = SentimentModel(
+        num_users=num_users,
+        num_products=num_products,
+        embedding_dim=300,  # GloVe embedding size
+        n_filters=100,
+        filter_sizes=[3, 4, 5],  # fuzzy n-gram sizes
+        user_emb_dim=100,
+        product_emb_dim=100,
+        output_dim=5,  # Ratings from 0 to 4
+        dropout=0.4,
+        user_embedding_weights=torch.tensor(user_embeddings,
+                                            dtype=torch.float32),
+        product_embedding_weights=torch.tensor(item_embeddings,
+                                            dtype=torch.float32)
+    )
+
+    early_stopping = EarlyStopping(monitor='val_acc', patience=5, mode='max')
+
+    lr_monitor = LearningRateMonitor(logging_interval='epoch')
+
+    checkpoint_callback = ModelCheckpoint(
+        # dirpath='checkpoints/fuzzy_ngram',        # Directory to save checkpoints
+        # filename='best_model_version_30',        # Filename for the checkpoint
+        save_weights_only=True,
+        monitor='val_acc',            # Monitored metric
+        mode='max',                   # Mode for the monitored metric ('min' or 'max')
+        save_top_k=1,
+        save_last=True,
+    )
+
+    trainer = Trainer(
+        max_epochs=100,
+        accelerator='gpu',
+        devices='auto',  # Automatically use available GPUs
+        strategy='ddp',
+        callbacks=[
+            # early_stopping, 
+            lr_monitor, 
+            checkpoint_callback],
+    )
     
     trainer.fit(model, train_loader, val_loader)
-    # trainer.fit(model, train_loader, val_loader, ckpt_path="lightning_logs/version_26/checkpoints/epoch=18-step=5529.ckpt")
+    # trainer.fit(model, train_loader, val_loader, ckpt_path="lightning_logs/version_49/checkpoints/last.ckpt")
 
     trainer.save_checkpoint(FINAL_CHECKPOINT_FILENAME)
 
