@@ -142,7 +142,7 @@ def load_data():
         print(' Done!')
         return train_df, test_df
     else:
-        raise FileNotFoundError("Preprocessed Parquet files not found. Run the preprocess() function first.")
+        raise FileNotFoundError("Preprocessed Parquet files not found. Run the preprocess() function first via `python preprocess_data.py`.")
 
 if __name__ == '__main__':
     preprocess()
