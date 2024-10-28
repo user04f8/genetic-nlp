@@ -7,16 +7,19 @@ from model_utils import initialize_environment
 device = initialize_environment(4)
 xgb_random_seed = 4
 
-# For reproducibility in NumPy and Python random module
+# For reproducibility
 import random
 import os
+import xgboost as xgb
 
 random.seed(xgb_random_seed)
 np.random.seed(xgb_random_seed)
 os.environ['PYTHONHASHSEED'] = str(xgb_random_seed)
-
-# For reproducibility in XGBoost
-import xgboost as xgb
+torch.manual_seed(xgb_random_seed)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(xgb_random_seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 xgb.set_config(verbosity=1)
 
 from sklearn.model_selection import train_test_split
@@ -34,31 +37,42 @@ test_data = np.load('test_embeddings.npz')
 X_test = test_data['embeddings']
 test_ids = test_data['ids']
 
-# Split the training data into training and validation sets
+# Split the data
 print("Splitting data into training and validation sets...")
 X_train, X_val, y_train, y_val = train_test_split(
-    X_full,
-    y_full,
-    test_size=0.2,  # 20% for validation
-    random_state=xgb_random_seed,
-    stratify=y_full  # Preserve class distribution
+    X_full, y_full, test_size=0.2, random_state=xgb_random_seed, stratify=y_full
 )
 
-# Train the XGBoost classifier
+# Convert labels to 0-based if necessary
+if y_train.min() == 1:
+    y_train -= 1
+    y_val -= 1
+
+# Configure and train the XGBoost classifier
 print("Training the XGBoost classifier...")
 xgb_clf = xgb.XGBClassifier(
     objective='multi:softmax',
-    num_class=5,  # Assuming labels are from 0 to 4
+    num_class=5,  # Labels from 0 to 4
+    tree_method='hist',
+    device='cuda',
     random_state=xgb_random_seed,
-    n_estimators=200,
-    max_depth=6,
-    learning_rate=0.05,
+    n_estimators=500,
+    max_depth=7,
+    learning_rate=0.01,
     subsample=0.8,
     colsample_bytree=0.8,
-    verbosity=1,
-    seed=xgb_random_seed
+    reg_alpha=0.1,
+    reg_lambda=1.0,
+    seed=xgb_random_seed,
+    early_stopping_rounds=50,
+    eval_metric='mlogloss',  # Monitor log loss for multi-class
 )
-xgb_clf.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=True)
+
+xgb_clf.fit(
+    X_train, y_train,
+    eval_set=[(X_val, y_val)],
+    verbose=True
+)
 
 # Evaluate on validation set
 print("Evaluating on the validation set...")
@@ -86,7 +100,7 @@ save_confusion_matrix(cm, labels)
 # Predict on test set
 print("Generating predictions on the test set...")
 y_test_pred = xgb_clf.predict(X_test)
-y_test_pred_adjusted = y_test_pred + 1  # Adjust labels from 0-4 to 1-5
+y_test_pred_adjusted = y_test_pred + 1  # Adjust labels back to 1-5
 
 # Generate submission file
 print("Generating submission file...")
@@ -97,7 +111,7 @@ submission_df = pd.DataFrame({
 submission_df.to_csv('submission_xgb.csv', index=False)
 print("Submission file 'submission_xgb.csv' has been generated.")
 
-# For reproducibility, print versions of libraries used
+# Print library versions
 print("\nLibrary Versions:")
 print(f"NumPy: {np.__version__}")
 print(f"PyTorch: {torch.__version__}")

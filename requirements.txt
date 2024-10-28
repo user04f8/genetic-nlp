@@ -20,3 +20,5 @@ tensorboard
 tensorboardx
 matplotlib
 seaborn
+
+xgboost
