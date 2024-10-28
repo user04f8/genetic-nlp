@@ -1,18 +1,25 @@
 import torch
 import numpy as np
 import pandas as pd
-from torch.utils.data import DataLoader, random_split
-from data_processor import DataProcessor, ReviewDataset, collate_fn
-from dynamic_als import update_df_and_get_als
-from preprocess_data import load_data
-from fuzzy_ngram_matrix_factors_model import SentimentModel
 from model_utils import initialize_environment
 
+# Set device and seeds for reproducibility
 device = initialize_environment(4)
 xgb_random_seed = 4
 
-# For reproducibility
+# For reproducibility in NumPy and Python random module
+import random
+import os
+
+random.seed(xgb_random_seed)
+np.random.seed(xgb_random_seed)
+os.environ['PYTHONHASHSEED'] = str(xgb_random_seed)
+
+# For reproducibility in XGBoost
 import xgboost as xgb
+xgb.set_config(verbosity=1)
+
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -20,16 +27,22 @@ import seaborn as sns
 # Load embeddings and labels
 print("Loading embeddings and labels...")
 train_data = np.load('train_embeddings.npz')
-X_train = train_data['embeddings']
-y_train = train_data['labels']
-
-val_data = np.load('val_embeddings.npz')
-X_val = val_data['embeddings']
-y_val = val_data['labels']
+X_full = train_data['embeddings']
+y_full = train_data['labels']
 
 test_data = np.load('test_embeddings.npz')
 X_test = test_data['embeddings']
 test_ids = test_data['ids']
+
+# Split the training data into training and validation sets
+print("Splitting data into training and validation sets...")
+X_train, X_val, y_train, y_val = train_test_split(
+    X_full,
+    y_full,
+    test_size=0.2,  # 20% for validation
+    random_state=xgb_random_seed,
+    stratify=y_full  # Preserve class distribution
+)
 
 # Train the XGBoost classifier
 print("Training the XGBoost classifier...")
@@ -51,7 +64,7 @@ xgb_clf.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=True)
 print("Evaluating on the validation set...")
 y_val_pred = xgb_clf.predict(X_val)
 val_acc = accuracy_score(y_val, y_val_pred)
-print(f"Validation Accuracy: {val_acc}")
+print(f"Validation Accuracy: {val_acc:.4f}")
 print(classification_report(y_val, y_val_pred))
 
 # Save confusion matrix
