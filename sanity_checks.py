@@ -45,5 +45,5 @@ def sanity_check_submission(submission_file, test_df, num_examples=5):
 
 if __name__ == '__main__':
     _, test_df = load_data()
-    submission_file = 'submission.csv'
+    submission_file = 'submission_xgb.csv'
     sanity_check_submission(submission_file, test_df, num_examples=25)
