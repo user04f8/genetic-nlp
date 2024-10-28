@@ -2,6 +2,7 @@
 
 A full script to do all of the below is available in `./run_all.sh`, assuming you already have **Python 3.11.7** or a compatible version and have the `kaggle` CLI set up.
 
+- if this is not the commit in which this line was added, DELETE ALL cache/ and .joblib files to fully reproduce; if you're trying to skip to generate submission then run `python fuzzy_ngram_matrix_factorization.py` with the meta-hyperparameters (in the .yaml) to then generate the correct .joblibs
 - Install/activate a virtual environment with Python 3.11.7
 - Install `requirements.txt`
 - Ensure the dataset is downloaded in `data/`, either as a *.zip or *.csv files

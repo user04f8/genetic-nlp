@@ -23,9 +23,9 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint', type=str, default=None, help="Path to the checkpoint file")
     args = parser.parse_args()
 
-    cull_unknown_threshold = 0
-    user_product_embed_size = 50
-    als_iterations = 1
+    cull_unknown_threshold = 2
+    user_product_embed_size = 10
+    als_iterations = 10
     als_regularization = 0.1
 
     # Load the data
