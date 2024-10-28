@@ -24,7 +24,7 @@ if __name__ == '__main__':
 
     cull_unknown_threshold = 3
     user_product_embed_size = 12
-    als_iterations = 10
+    als_iterations = 20
     als_regularization = 0.1
 
     # Load the data
@@ -67,12 +67,12 @@ if __name__ == '__main__':
         user_emb_dim=user_product_embed_size,
         product_emb_dim=user_product_embed_size,
         output_dim=5,  # Ratings from 0 to 4
-        dropout=0.6,
+        dropout=0.55,
         user_embedding_weights=torch.tensor(user_embeddings, dtype=torch.float32),
         product_embedding_weights=torch.tensor(item_embeddings, dtype=torch.float32),
-        blend_factor=0.1,  # Adjust to taste :P
+        blend_factor=0.3,  # Adjust to taste :P
         unfreeze_epoch=4,
-        weight_decay=5e-2,
+        weight_decay=2e-2,
         extern_params={
             'als_factors': user_product_embed_size,
             'als_iterations': als_iterations,
