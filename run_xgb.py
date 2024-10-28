@@ -1,9 +1,10 @@
 import torch
 import numpy as np
 import pandas as pd
-from model_utils import initialize_environment
 
 # Set device and seeds for reproducibility
+from model_utils import initialize_environment
+
 device = initialize_environment(4)
 xgb_random_seed = 4
 
@@ -20,12 +21,13 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(xgb_random_seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-xgb.set_config(verbosity=1)
+xgb.set_config(verbosity=2)
 
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold, RandomizedSearchCV
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
+from imblearn.over_sampling import RandomOverSampler
 
 # Load embeddings and labels
 print("Loading embeddings and labels...")
@@ -37,49 +39,96 @@ test_data = np.load('test_embeddings.npz')
 X_test = test_data['embeddings']
 test_ids = test_data['ids']
 
-# Split the data
+# Convert labels to 0-based if necessary
+if y_full.min() == 1:
+    y_full -= 1
+
+# Analyze class distribution
+def plot_class_distribution(labels, title):
+    classes, counts = np.unique(labels, return_counts=True)
+    plt.bar(classes + 1, counts)  # Adjust if classes start from 0
+    plt.xlabel('Class')
+    plt.ylabel('Frequency')
+    plt.title(title)
+    plt.show()
+
+print("Original class distribution:")
+plot_class_distribution(y_full, 'Original Training Set Class Distribution')
+
+# Oversample the minority classes
+ros = RandomOverSampler(random_state=xgb_random_seed)
+X_resampled, y_resampled = ros.fit_resample(X_full, y_full)
+
+print("After oversampling:")
+plot_class_distribution(y_resampled, 'Resampled Training Set Class Distribution')
+
+# Split the data into training and validation sets
 print("Splitting data into training and validation sets...")
 X_train, X_val, y_train, y_val = train_test_split(
-    X_full, y_full, test_size=0.2, random_state=xgb_random_seed, stratify=y_full
+    X_resampled, y_resampled, test_size=0.2, random_state=xgb_random_seed, stratify=y_resampled
 )
 
-# Convert labels to 0-based if necessary
-if y_train.min() == 1:
-    y_train -= 1
-    y_val -= 1
+# Prepare the parameter grid for RandomizedSearchCV
+param_dist = {
+    'n_estimators': [500, 1000, 1500],
+    'max_depth': [6, 8, 10],
+    'learning_rate': [0.01, 0.05, 0.1],
+    'reg_alpha': [0, 0.1, 1.0],
+    'reg_lambda': [1.0, 2.0, 5.0],
+    'subsample': [0.7, 0.8, 1.0],
+    'colsample_bytree': [0.7, 0.8, 1.0],
+}
 
-# Configure and train the XGBoost classifier
-print("Training the XGBoost classifier...")
+# Initialize the XGBoost classifier
 xgb_clf = xgb.XGBClassifier(
     objective='multi:softmax',
     num_class=5,  # Labels from 0 to 4
     tree_method='hist',
     device='cuda',
     random_state=xgb_random_seed,
-    n_estimators=500,
-    max_depth=7,
-    learning_rate=0.01,
-    subsample=0.8,
-    colsample_bytree=0.8,
-    reg_alpha=0.1,
-    reg_lambda=1.0,
     seed=xgb_random_seed,
-    early_stopping_rounds=50,
     eval_metric='mlogloss',  # Monitor log loss for multi-class
+    use_label_encoder=False
 )
 
-xgb_clf.fit(
+# Use RandomizedSearchCV for hyperparameter tuning
+print("Starting hyperparameter tuning with RandomizedSearchCV...")
+skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=xgb_random_seed)
+
+random_search = RandomizedSearchCV(
+    estimator=xgb_clf,
+    param_distributions=param_dist,
+    n_iter=5,
+    scoring='accuracy',
+    cv=skf,
+    verbose=2,
+    random_state=xgb_random_seed,
+    n_jobs=-1
+)
+
+random_search.fit(X_train, y_train)
+
+print(f"Best Hyperparameters: {random_search.best_params_}")
+print(f"Best Cross-Validation Accuracy: {random_search.best_score_:.4f}")
+
+# Get the best estimator
+best_xgb_clf = random_search.best_estimator_
+
+# Train the best model on the training set
+print("Training the best XGBoost classifier on the training set...")
+best_xgb_clf.fit(
     X_train, y_train,
     eval_set=[(X_val, y_val)],
+    early_stopping_rounds=30,
     verbose=True
 )
 
 # Evaluate on validation set
 print("Evaluating on the validation set...")
-y_val_pred = xgb_clf.predict(X_val)
+y_val_pred = best_xgb_clf.predict(X_val)
 val_acc = accuracy_score(y_val, y_val_pred)
 print(f"Validation Accuracy: {val_acc:.4f}")
-print(classification_report(y_val, y_val_pred))
+print(classification_report(y_val, y_val_pred, digits=4))
 
 # Save confusion matrix
 cm = confusion_matrix(y_val, y_val_pred)
@@ -99,7 +148,7 @@ save_confusion_matrix(cm, labels)
 
 # Predict on test set
 print("Generating predictions on the test set...")
-y_test_pred = xgb_clf.predict(X_test)
+y_test_pred = best_xgb_clf.predict(X_test)
 y_test_pred_adjusted = y_test_pred + 1  # Adjust labels back to 1-5
 
 # Generate submission file
@@ -110,11 +159,3 @@ submission_df = pd.DataFrame({
 })
 submission_df.to_csv('submission_xgb.csv', index=False)
 print("Submission file 'submission_xgb.csv' has been generated.")
-
-# Print library versions
-print("\nLibrary Versions:")
-print(f"NumPy: {np.__version__}")
-print(f"PyTorch: {torch.__version__}")
-print(f"Pandas: {pd.__version__}")
-print(f"XGBoost: {xgb.__version__}")
-print(f"Random Seed: {xgb_random_seed}")
