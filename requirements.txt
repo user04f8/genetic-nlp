@@ -8,7 +8,10 @@ implicit
 joblib
 scikit-learn
 tqdm
-scipy
+scipy<1.13
+
+pyarrow
+fastparquet
 
 optuna
 optuna-integration
