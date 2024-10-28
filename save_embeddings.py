@@ -2,11 +2,16 @@ import torch
 import numpy as np
 import pandas as pd
 from torch.utils.data import DataLoader, random_split
+
+from model_utils import (
+    initialize_environment, load_trained_model, process_data, create_dataloader, generate_submission
+)
 from data_processor import DataProcessor, ReviewDataset, collate_fn
 from dynamic_als import update_df_and_get_als
 from preprocess_data import load_data
 from fuzzy_ngram_matrix_factors_model import SentimentModel
 
+initialize_environment(3)  # reproducability
 # Set device
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -93,21 +98,19 @@ train_loader = DataLoader(
 )
 
 # Process test_df
-test_df = data_processor.process_reviews(test_df, is_training=False)
+data_processor = DataProcessor(unknown_threshold=None)
+# NOTE original unknown_threshold is from hparams.yaml
+data_processor.load_encoders()
 
-# Prepare the dataset and dataloaders for test data
-test_dataset = ReviewDataset(test_df)
-test_loader = DataLoader(
-    test_dataset,
-    batch_size=batch_size,
-    shuffle=False,
-    collate_fn=collate_fn,
-    num_workers=8,
-    pin_memory=True
-)
+print('Running process_data()')
+processed_test_df = process_data(test_df, data_processor, is_training=False)
 
+print('Creating dataloader')
+batch_size = 512
+test_dataloader = create_dataloader(processed_test_df, batch_size, is_training=False)
 # Load the trained model
-model = SentimentModel.load_from_checkpoint('path_to_your_checkpoint.ckpt')
+BEST_CHECKPOINT_FILENAME = 'lightning_logs/heavy_regularization/version_1/checkpoints/epoch=40-step=11931.ckpt'
+model = SentimentModel.load_from_checkpoint(BEST_CHECKPOINT_FILENAME)
 model.to(device)
 
 # Extract embeddings for the training set
@@ -120,7 +123,7 @@ print("Training embeddings saved to 'train_embeddings.npz'.")
 
 # Extract embeddings for the test set
 print("Extracting embeddings for the test set...")
-test_embeddings, _, test_ids = extract_embeddings(model, test_loader, device)
+test_embeddings, _, test_ids = extract_embeddings(model, test_dataloader, device)
 
 # Save test embeddings and IDs
 np.savez_compressed('test_embeddings.npz', embeddings=test_embeddings, ids=np.array(test_ids))
