@@ -7,5 +7,6 @@ A full script to do all of the below is available in `./run_all.sh`, assuming yo
 - Ensure the dataset is downloaded in `data/`, either as a *.zip or *.csv files
 - Run the preprocessing script `preprocess_data.py`
 - Download GloVe: `wget https://nlp.stanford.edu/data/wordvecs/glove.840B.300d.zip`
-- Run the main train script via `python fuzzy_ngram_matrix_factorization.py`
+- (optional) reproduce the hyperparameter search via `python hyper_train.py` -- note that as of this commit, due to compute limitations the top hyperparameters has not been able to reproduce my intuition for what best parameters are
+- Run the main train script via `python modular_train.py` (best hyperparameters) or `python fuzzy_ngram_matrix_factorization.py` (more fine manual control, also the file used in submission 1) 
 - Generate the final csv file via `python fuzzy_ngram_generate_submission.py` (**Skip to this step if you just want to reproduce the final model test**)

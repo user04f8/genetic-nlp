@@ -1,0 +1,16 @@
+{
+    "trial_number": 4,
+    "value": 0.693771481513977,
+    "params": {
+        "user_product_embed_size": 42,
+        "als_iterations": 12,
+        "als_regularization": 0.00015614318890268264,
+        "n_filters": 58,
+        "filter_sizes": "all",
+        "dropout": 0.2754135840215683,
+        "blend_factor": 0.4052009347677662,
+        "unfreeze_epoch": 4,
+        "weight_decay": 4.171651131922257e-05,
+        "learning_rate": 7.031153505118012e-05
+    }
+}

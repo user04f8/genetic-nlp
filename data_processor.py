@@ -81,14 +81,15 @@ class DataProcessor:
         return [label_to_index.get(label, unknown_value) for label in labels]
 
     def process_reviews(self, df, is_training=True):
+        print("Processing df")
         if is_training:
-            # Map low-frequency users/products in training data
-            df['UserId'] = df['UserId'].apply(
-                lambda x: '<unknown_user>' if x in self.low_freq_users else x
-            )
-            df['ProductId'] = df['ProductId'].apply(
-                lambda x: '<unknown_product>' if x in self.low_freq_products else x
-            )
+            print("mapping unknowns of UserId")
+            # Vectorized mapping for 'UserId'
+            df['UserId'] = np.where(df['UserId'].isin(self.low_freq_users), '<unknown_user>', df['UserId'])
+
+            print("mapping unknowns of ProductId")
+            # Vectorized mapping for 'ProductId'
+            df['ProductId'] = np.where(df['ProductId'].isin(self.low_freq_products), '<unknown_product>', df['ProductId'])
 
             df['user_idx'] = self.user_encoder.transform(df['UserId'])
             df['product_idx'] = self.product_encoder.transform(df['ProductId'])

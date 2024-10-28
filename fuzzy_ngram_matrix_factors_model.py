@@ -30,6 +30,10 @@ class SentimentModel(pl.LightningModule):
     ):
         super(SentimentModel, self).__init__()
 
+        if als_freeze:
+            raise NotImplementedError()
+        
+
         # Save hyperparameters, excluding large embedding weights
         self.save_hyperparameters(
             ignore=['user_embedding_weights', 'product_embedding_weights']
