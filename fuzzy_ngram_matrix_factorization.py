@@ -14,7 +14,8 @@ from utils import seed_everything
 FINAL_CHECKPOINT_FILENAME = "checkpoints/fuzzy_ngram_model.ckpt"
 
 # Reproducibility
-seed_everything(3)
+RANDOM_STATE = 4  # NOTE: before this was added RANDOM_STATE = 3 generally
+seed_everything(RANDOM_STATE)
 torch.set_float32_matmul_precision('high')
 
 if __name__ == '__main__':
@@ -22,9 +23,9 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint', type=str, default=None, help="Path to the checkpoint file")
     args = parser.parse_args()
 
-    cull_unknown_threshold = 3
-    user_product_embed_size = 12
-    als_iterations = 20
+    cull_unknown_threshold = 0
+    user_product_embed_size = 50
+    als_iterations = 1
     als_regularization = 0.1
 
     # Load the data
@@ -57,27 +58,27 @@ if __name__ == '__main__':
         val_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=8, pin_memory=True
     )
 
-    # Initialize the model with blend_factor and unfreeze_epoch
     model = SentimentModel(
         num_users=num_users,
         num_products=num_products,
         embedding_dim=300,  # GloVe embedding size
         n_filters=100,
-        filter_sizes=[4, 5, 6, 8],  # fuzzy n-gram sizes
+        filter_sizes=[3, 4, 5, 7],  # fuzzy n-gram sizes
         user_emb_dim=user_product_embed_size,
         product_emb_dim=user_product_embed_size,
         output_dim=5,  # Ratings from 0 to 4
-        dropout=0.55,
+        dropout=0.4,
         user_embedding_weights=torch.tensor(user_embeddings, dtype=torch.float32),
         product_embedding_weights=torch.tensor(item_embeddings, dtype=torch.float32),
-        blend_factor=0.3,  # Adjust to taste :P
-        unfreeze_epoch=4,
-        weight_decay=2e-2,
+        blend_factor=0.0,  # Adjust to taste :P
+        unfreeze_epoch=0,
+        weight_decay=None,
         extern_params={
             'als_factors': user_product_embed_size,
             'als_iterations': als_iterations,
             'als_regularization': als_regularization,
-            'cull_unknown_threshold': cull_unknown_threshold
+            'cull_unknown_threshold': cull_unknown_threshold,
+            'random_state': RANDOM_STATE
         }
     )
 
@@ -92,7 +93,7 @@ if __name__ == '__main__':
         save_last=True,
     )
 
-    logger = TensorBoardLogger("lightning_logs", name="heavy_regularization")
+    logger = TensorBoardLogger("lightning_logs", name="recreate_v65")
 
     # Trainer
     trainer = Trainer(
@@ -108,7 +109,6 @@ if __name__ == '__main__':
         logger=logger
     )
 
-    # Train the model
     trainer.fit(model, train_loader, val_loader, ckpt_path=args.checkpoint)
     trainer.save_checkpoint(FINAL_CHECKPOINT_FILENAME)
     print(f'Training finished! Final checkpoint saved at {FINAL_CHECKPOINT_FILENAME}')
