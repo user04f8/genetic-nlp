@@ -232,3 +232,48 @@ class SentimentModel(pl.LightningModule):
             missing_keys.remove('embedding.weight')
         if strict and (len(missing_keys) > 0 or len(unexpected_keys) > 0):
             raise RuntimeError(f"Missing or unexpected keys: {missing_keys} {unexpected_keys}")
+
+    def get_embeddings(self, text, summary, user_idx, product_idx, helpfulness_ratio, log_helpfulness_denominator):
+        # Text Embedding
+        embedded_text = self.embedding(text)  # [batch_size, text_len, emb_dim]
+        embedded_text = embedded_text.unsqueeze(1)  # [batch_size, 1, text_len, emb_dim]
+
+        # Summary Embedding
+        embedded_summary = self.embedding(summary)  # [batch_size, summary_len, emb_dim]
+        embedded_summary = embedded_summary.unsqueeze(1)  # [batch_size, 1, summary_len, emb_dim]
+
+        # Fuzzy n-grams on Text
+        text_n_grams = [F.relu(conv(embedded_text)).squeeze(3) for conv in self.convs]
+        text_pooled = [F.max_pool1d(t, t.size(2)).squeeze(2) for t in text_n_grams]
+
+        # Fuzzy n-grams on Summary
+        summary_n_grams = [F.relu(conv(embedded_summary)).squeeze(3) for conv in self.convs]
+        summary_pooled = [F.max_pool1d(s, s.size(2)).squeeze(2) for s in summary_n_grams]
+
+        # Concatenate pooled features
+        text_features = torch.cat(text_pooled, dim=1)
+        summary_features = torch.cat(summary_pooled, dim=1)
+        text_cat = torch.cat([text_features, summary_features], dim=1)
+
+        text_cat = self.dropout(text_cat)
+
+        user_embedded = self.user_embedding(user_idx)
+        product_embedded = self.product_embedding(product_idx)
+
+        # Ensure helpfulness_ratio and log_helpfulness_denominator are 2D tensors
+        helpfulness_ratio = helpfulness_ratio.unsqueeze(1)                      # [batch_size, 1]
+        log_helpfulness_denominator = log_helpfulness_denominator.unsqueeze(1)  # [batch_size, 1]
+
+        # Combine user and product embeddings
+        user_product_features = self.user_product_pool(
+            self.user_product_dim_reduction(torch.cat([user_embedded, product_embedded], dim=1))
+        )
+
+        # Concatenate all features
+        combined = torch.cat(
+            [text_cat, user_product_features, helpfulness_ratio, log_helpfulness_denominator], dim=1
+        )
+
+        combined = self.dropout(combined)
+
+        return combined.detach()
