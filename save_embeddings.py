@@ -1,9 +1,13 @@
 import torch
 import numpy as np
-
+import pandas as pd
+from torch.utils.data import DataLoader, random_split
+from data_processor import DataProcessor, ReviewDataset, collate_fn
+from dynamic_als import update_df_and_get_als
+from preprocess_data import load_data
 from fuzzy_ngram_matrix_factors_model import SentimentModel
-from data_processor import train_loader, test_loader
 
+# Set device
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def extract_embeddings(model, dataloader, device):
@@ -22,7 +26,9 @@ def extract_embeddings(model, dataloader, device):
             log_helpfulness_denominator = batch['log_helpfulness_denominator'].to(device)
 
             # Extract embeddings
-            embeddings = model.get_embeddings(text, summary, user, product, helpfulness_ratio, log_helpfulness_denominator)
+            embeddings = model.get_embeddings(
+                text, summary, user, product, helpfulness_ratio, log_helpfulness_denominator
+            )
             all_embeddings.append(embeddings.cpu())
 
             # Collect labels and IDs
@@ -39,17 +45,83 @@ def extract_embeddings(model, dataloader, device):
 
     return embeddings.numpy(), labels.numpy() if labels is not None else None, ids
 
+# from hparams.yaml
+# extern_params:
+#   als_factors: 10
+#   als_iterations: 10
+#   als_regularization: 0.1
+#   cull_unknown_threshold: 2
+cull_unknown_threshold = 2
+user_product_embed_size = 10
+als_iterations = 10
+als_regularization = 0.1
+batch_size = 512  # Adjust based on your GPU memory
+
+# Load data
+train_df, test_df = load_data()
+
+# Initialize DataProcessor and set encoders
+data_processor = DataProcessor(no_unknowns=False, unknown_threshold=cull_unknown_threshold)
+data_processor.fit_encoders(train_df)
+
+# Generate ALS embeddings and update DataFrame
+user_embeddings, item_embeddings, num_users, num_products = update_df_and_get_als(
+    train_df,
+    data_processor,
+    n_factors=user_product_embed_size,
+    n_iterations=als_iterations,
+    regularization=als_regularization,
+    cache_dir='./cache/'
+)
+
+# Process train_df to include 'user_idx' and 'product_idx'
+train_df = data_processor.process_reviews(train_df, is_training=True)
+
+# Prepare the dataset and dataloaders for training data
+dataset = ReviewDataset(train_df)
+train_size = int(0.8 * len(dataset))
+val_size = len(dataset) - train_size
+train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=batch_size,
+    shuffle=False,
+    collate_fn=collate_fn,
+    num_workers=8,
+    pin_memory=True
+)
+
+# Process test_df
+test_df = data_processor.process_reviews(test_df, is_training=False)
+
+# Prepare the dataset and dataloaders for test data
+test_dataset = ReviewDataset(test_df)
+test_loader = DataLoader(
+    test_dataset,
+    batch_size=batch_size,
+    shuffle=False,
+    collate_fn=collate_fn,
+    num_workers=8,
+    pin_memory=True
+)
+
+# Load the trained model
 model = SentimentModel.load_from_checkpoint('path_to_your_checkpoint.ckpt')
 model.to(device)
 
 # Extract embeddings for the training set
+print("Extracting embeddings for the training set...")
 train_embeddings, train_labels, _ = extract_embeddings(model, train_loader, device)
 
 # Save train embeddings and labels
 np.savez_compressed('train_embeddings.npz', embeddings=train_embeddings, labels=train_labels)
+print("Training embeddings saved to 'train_embeddings.npz'.")
 
 # Extract embeddings for the test set
+print("Extracting embeddings for the test set...")
 test_embeddings, _, test_ids = extract_embeddings(model, test_loader, device)
 
 # Save test embeddings and IDs
 np.savez_compressed('test_embeddings.npz', embeddings=test_embeddings, ids=np.array(test_ids))
+print("Test embeddings saved to 'test_embeddings.npz'.")
