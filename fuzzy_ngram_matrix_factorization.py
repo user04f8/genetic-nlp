@@ -17,6 +17,34 @@ FINAL_CHECKPOINT_FILENAME = "checkpoints/fuzzy_ngram_model.ckpt"
 RANDOM_STATE = 4  # NOTE: before this was added RANDOM_STATE = 3 generally
 seed_everything(RANDOM_STATE)
 torch.set_float32_matmul_precision('high')
+"""
+als_freeze: false
+blend_factor: 0.9
+dropout: 0.4
+embedding_dim: 300
+enable_user_product_dim_reduce: false
+extern_params:
+  als_factors: 10
+  als_iterations: 10
+  als_regularization: 0.1
+  cull_unknown_threshold: 2
+filter_sizes:
+- 3
+- 4
+- 5
+- 7
+latent_user_product_dim: 25
+learning_rate: 0.001
+n_filters: 100
+no_load_glove: false
+num_products: 49945
+num_users: 123356
+output_dim: 5
+product_emb_dim: 10
+unfreeze_epoch: 10
+user_emb_dim: 10
+weight_decay: 0.01
+"""
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Train a model with an optional checkpoint path")
@@ -70,8 +98,8 @@ if __name__ == '__main__':
         dropout=0.4,
         user_embedding_weights=torch.tensor(user_embeddings, dtype=torch.float32),
         product_embedding_weights=torch.tensor(item_embeddings, dtype=torch.float32),
-        blend_factor=0.0,  # Adjust to taste :P
-        unfreeze_epoch=0,
+        blend_factor=0.9,  # Adjust to taste :P
+        unfreeze_epoch=10,
         weight_decay=None,
         extern_params={
             'als_factors': user_product_embed_size,
