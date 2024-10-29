@@ -1,3 +1,13 @@
+# Summary
+
+This repo contains the winning submission for the CS 506 kaggle competition, principally leveraging matrix factorization as a means of collaborative filtering with a fuzzy matching of n-grams leveraging the GloVe embedding.
+
+Full details are available in `final_report.pdf`.
+
+Expirements and exploratory scripts used in the production of the final tools are available in `experiments/`. Move these to the repo root if you wish to reproduce them.
+
+See below for reproduction of the winning submission.
+
 # Setup
 
 A full script to do all of the below is available in `./run_all.sh`, assuming you already have **Python 3.11.7** or a compatible version and have the `kaggle` CLI set up. I have also tested the core functionalities in a Python 3.12.7 conda environment; however, I recommend setting up Python 3.11.7. Note the below special instructions if you use conda in Conda setup.
@@ -11,6 +21,8 @@ A full script to do all of the below is available in `./run_all.sh`, assuming yo
 - (optional) reproduce the hyperparameter search via `python hyper_train.py` -- note that as of this commit, due to compute limitations the top hyperparameters has not been able to reproduce my intuition for what best parameters are
 - Run the main train script via `python modular_train.py` (best hyperparameters) or `python fuzzy_ngram_matrix_factorization.py` (more fine manual control, also the file used in submission 1) 
 - Generate the final csv file via `python fuzzy_ngram_generate_submission.py` (**Skip to this step if you just want to reproduce the final model test**)
+
+The above is for the reproduction of the winning submission. If you'd like to reproduce the xgd boost submission, please see `run_all_submission_2.sh`.
 
 ## Conda setup
 
