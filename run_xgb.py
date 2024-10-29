@@ -21,13 +21,14 @@ if torch.cuda.is_available():
     torch.cuda.manual_seed_all(xgb_random_seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-xgb.set_config(verbosity=2)
+xgb.set_config(verbosity=1)
 
 from sklearn.model_selection import train_test_split, StratifiedKFold, RandomizedSearchCV
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
-from imblearn.over_sampling import RandomOverSampler
+# Commented out to avoid oversampling and reduce data size
+# from imblearn.over_sampling import RandomOverSampler
 
 # Load embeddings and labels
 print("Loading embeddings and labels...")
@@ -43,43 +44,24 @@ test_ids = test_data['ids']
 if y_full.min() == 1:
     y_full -= 1
 
-# Analyze class distribution
-def plot_class_distribution(labels, title):
-    classes, counts = np.unique(labels, return_counts=True)
-    plt.bar(classes + 1, counts)  # Adjust if classes start from 0
-    plt.xlabel('Class')
-    plt.ylabel('Frequency')
-    plt.title(title)
-    plt.show()
-
-print("Original class distribution:")
-plot_class_distribution(y_full, 'Original Training Set Class Distribution')
-
-# Oversample the minority classes
-ros = RandomOverSampler(random_state=xgb_random_seed)
-X_resampled, y_resampled = ros.fit_resample(X_full, y_full)
-
-print("After oversampling:")
-plot_class_distribution(y_resampled, 'Resampled Training Set Class Distribution')
-
 # Split the data into training and validation sets
 print("Splitting data into training and validation sets...")
 X_train, X_val, y_train, y_val = train_test_split(
-    X_resampled, y_resampled, test_size=0.2, random_state=xgb_random_seed, stratify=y_resampled
+    X_full, y_full, test_size=0.2, random_state=xgb_random_seed, stratify=y_full
 )
 
-# Prepare the parameter grid for RandomizedSearchCV
+# Define a smaller parameter grid
 param_dist = {
-    'n_estimators': [500, 1000, 1500],
-    'max_depth': [6, 8, 10],
-    'learning_rate': [0.01, 0.05, 0.1],
-    'reg_alpha': [0, 0.1, 1.0],
-    'reg_lambda': [1.0, 2.0, 5.0],
-    'subsample': [0.7, 0.8, 1.0],
-    'colsample_bytree': [0.7, 0.8, 1.0],
+    'n_estimators': [500],
+    'max_depth': [6, 8],
+    'learning_rate': [0.01],
+    'reg_alpha': [0, 0.1],
+    'reg_lambda': [1.0],
+    'subsample': [0.8],
+    'colsample_bytree': [0.8],
 }
 
-# Initialize the XGBoost classifier
+# Initialize the XGBoost classifier without deprecated parameters
 xgb_clf = xgb.XGBClassifier(
     objective='multi:softmax',
     num_class=5,  # Labels from 0 to 4
@@ -87,23 +69,22 @@ xgb_clf = xgb.XGBClassifier(
     device='cuda',
     random_state=xgb_random_seed,
     seed=xgb_random_seed,
-    eval_metric='mlogloss',  # Monitor log loss for multi-class
-    use_label_encoder=False
+    eval_metric='mlogloss'  # Monitor log loss for multi-class
 )
 
-# Use RandomizedSearchCV for hyperparameter tuning
+# Use RandomizedSearchCV with reduced n_iter and n_jobs=1
 print("Starting hyperparameter tuning with RandomizedSearchCV...")
-skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=xgb_random_seed)
+skf = StratifiedKFold(n_splits=2, shuffle=True, random_state=xgb_random_seed)
 
 random_search = RandomizedSearchCV(
     estimator=xgb_clf,
     param_distributions=param_dist,
-    n_iter=5,
+    n_iter=3,  # Reduced number of iterations
     scoring='accuracy',
     cv=skf,
     verbose=2,
     random_state=xgb_random_seed,
-    n_jobs=-1
+    n_jobs=1  # Run experiments in sequence
 )
 
 random_search.fit(X_train, y_train)
@@ -119,7 +100,7 @@ print("Training the best XGBoost classifier on the training set...")
 best_xgb_clf.fit(
     X_train, y_train,
     eval_set=[(X_val, y_val)],
-    early_stopping_rounds=30,
+    early_stopping_rounds=50,
     verbose=True
 )
 
@@ -159,3 +140,11 @@ submission_df = pd.DataFrame({
 })
 submission_df.to_csv('submission_xgb.csv', index=False)
 print("Submission file 'submission_xgb.csv' has been generated.")
+
+# Print library versions
+print("\nLibrary Versions:")
+print(f"NumPy: {np.__version__}")
+print(f"PyTorch: {torch.__version__}")
+print(f"Pandas: {pd.__version__}")
+print(f"XGBoost: {xgb.__version__}")
+print(f"Random Seed: {xgb_random_seed}")
