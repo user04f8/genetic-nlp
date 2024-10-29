@@ -1,0 +1,26 @@
+als_freeze: false
+blend_factor: 0.9
+dropout: 0.4
+embedding_dim: 300
+enable_user_product_dim_reduce: false
+extern_params:
+  als_factors: 10
+  als_iterations: 10
+  als_regularization: 0.1
+  cull_unknown_threshold: 2
+filter_sizes:
+- 3
+- 4
+- 5
+- 7
+latent_user_product_dim: 25
+learning_rate: 0.001
+n_filters: 100
+no_load_glove: false
+num_products: 49945
+num_users: 123356
+output_dim: 5
+product_emb_dim: 10
+unfreeze_epoch: 10
+user_emb_dim: 10
+weight_decay: 0.01
