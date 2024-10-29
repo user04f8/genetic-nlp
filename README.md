@@ -2,7 +2,7 @@
 
 This repo contains the winning submission for the CS 506 kaggle competition, principally leveraging matrix factorization as a means of collaborative filtering with a fuzzy matching of n-grams leveraging the GloVe embedding.
 
-Full details are available in `final_report.pdf`.
+Full details are available in `postmortem.pdf`.
 
 Expirements and exploratory scripts used in the production of the final tools are available in `experiments/`. Move these to the repo root if you wish to reproduce them.
 
